@@ -1,0 +1,27 @@
+"""P0 smoke test: the app starts, warms up, and reports its mode without any API key."""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import DEV_DEFAULT_JWT_SECRET, load_settings
+from app.main import app
+
+
+def test_health_ready_with_fake_llm():
+    with TestClient(app) as client:  # `with` runs the startup warm-up
+        resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "ready": True, "llm": "fake", "dev_mode": True}
+
+
+def test_short_jwt_secret_rejected(monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "too-short")
+    with pytest.raises(ValueError, match="at least"):
+        load_settings().validate()
+
+
+def test_dev_default_secret_rejected_when_dev_mode_off(monkeypatch):
+    monkeypatch.setenv("DEV_MODE", "false")
+    monkeypatch.setenv("JWT_SECRET", DEV_DEFAULT_JWT_SECRET)
+    with pytest.raises(ValueError, match="dev default"):
+        load_settings().validate()

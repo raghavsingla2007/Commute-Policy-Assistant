@@ -1,0 +1,27 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Runtime data (Chroma + SQLite)
+var/
+*.sqlite
+*.sqlite3
+chroma/
+
+# Eval output: only committed Groq results are kept
+eval/results/*
+!eval/results/.gitkeep
+!eval/results/groq_*.jsonl
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

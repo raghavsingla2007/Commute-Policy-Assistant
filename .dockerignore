@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+var
+chroma
+*.sqlite
+*.sqlite3
+eval/results/*
+!eval/results/.gitkeep
+.DS_Store
