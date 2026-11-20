@@ -188,6 +188,14 @@ def test_log_line_has_timings_and_truncated_question(store, caplog):
     assert long_q[:400] not in line and long_q[:100].strip() in line
 
 
+@pytest.mark.parametrize("empty", ["", "   ", "\n\t ", "(S1)", " [S1, S2] "])
+def test_empty_answer_is_unverified_not_answered(store, empty):
+    """An "answered" reply with no text (or only a stray label) must never reach the user as answered."""
+    res = ask(store, Scripted({"status": "answered", "answer": empty, "citations": ["S1"]}))
+    assert_not_covered(res, "unverified")
+    assert res.detail == "empty answer" and res.llm_calls == 1
+
+
 def test_echoing_a_stale_value_from_the_question_is_unverified(store):
     llm = Scripted({"status": "answered", "answer": "Yes, you get an escort for a drop after 10 PM.", "citations": ["S1"]})
     res = ask(store, llm, "Do I get an escort if my drop leaves after 10 PM?")

@@ -319,6 +319,8 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | D101 | Image: delete the downloaded model tarball (`onnx.tar.gz`) in the same RUN step that extracts it | Keep it | Chroma checks only the six extracted files (read in its source); image 334.9 MB → 251.7 MB; tests pass with `--network none` | — |
 | D102 | `/docs`, `/redoc`, `/openapi.json` stay enabled with DEV_MODE off; documented in README limitations | Disable when DEV_MODE is off | They show route shapes only; disabling cleanly needs the setting at app construction (before the lifespan reads config) | Route shapes are public |
 | D103 | Second Groq latency run (P10, `--repeat 2`) committed as `groq_vector_full_p10_latency.*` and reported next to P7 | Report only P7 | It shows provider variance honestly: more 503s, not slower answers | — |
+| D104 | **Fix (P11, owner-approved):** an "answered" reply whose text is empty, whitespace, or only a stray label ("(S1)") after `strip_labels` becomes `not_covered`, reason `unverified`, detail "empty answer", with the fixed desk message | Leave it (audit P10-4) | A 200 "answered" with no text is a broken answer; treating it like a failed verification reuses an existing user state (D13). 0 empty answers in every committed Groq file, so the published numbers and `eval/eval_set.jsonl` stay valid | — |
+| D105 | **Fix (P11, owner-approved, optional item):** the two registry lookups in `retrieve()` (`store.active_policy`) run via `asyncio.to_thread`, so a locked SQLite file can't block the event loop past the request deadline. 2 changed lines | Leave on the event loop (audit P10-3); WAL mode | Within the owner's ≤ 10-line limit and confined to that call site. Before: a locked registry blocked the request 5.29 s (test failed on HEAD); after: 503 within the deadline | Every request makes one more thread hop (sub-ms) |
 | D48 | Wording fixes found while drafting cases: Tamarind §3 → "Booking Cut-off", "Regular roster trips must be requested…" (owner decision); Orbitron §7 made an exhaustive list ("…; no other trips count as ad-hoc trips") so airport stays clearly SILENT; `k-nc-medical` replaced by `k-nc-maternity` because Kestrel §6 defines ad-hoc as *any* off-roster trip (a hospital trip is covered); `t-inj-doc` asks "Am I eligible for company cabs?" so a correct refusal can't echo "free cabs anywhere" | Keep the original wording/cases | Each removed a case where a correct answer could be scored wrong | Cases now differ slightly from the plan in §8.3 (updated) |
 
 ---
@@ -803,6 +805,8 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 | 2026-11-20 | P9 | The case-study brief PDF is **tracked in git** (committed in `26b9164 making base`) although `.gitignore` lists it | `.gitignore` doesn't affect files already tracked | Not fixable without a git write; reported to the owner (`git rm --cached "Case Study B – Commute Policy Assistant.docx.pdf"` if it shouldn't be in the repo) |
 | 2026-11-20 | P9 | Rehearsal driver crashed: `FileNotFoundError: '…/"Case'` | `git ls-files` quotes names with spaces/non-ASCII; split on whitespace | Use `git ls-files -z` (scratchpad tool only) |
 | 2026-11-20 | P9 | Draft `scripts/demo.sh` formatter used `\"` inside f-string expressions | A SyntaxError before Python 3.12 (macOS python3 may be older) | %-formatting; script checked with `bash -n` and run end to end |
+| 2026-11-21 | P11 | Empty "answered" text reached users as 200 answered "" (audit P10-4) | No check after `strip_labels` | D104 + `test_ask.py::test_empty_answer_is_unverified_not_answered` (5 cases: "", "   ", "\n\t ", "(S1)", " [S1, S2] ") + `test_api.py::test_empty_answered_reply_is_not_covered_over_http` (3 cases); 8 of these fail on HEAD's `ask.py` |
+| 2026-11-21 | P11 | Locked registry blocked a request 5.29 s past its deadline (audit P10-3) | Synchronous sqlite3 read on the event loop | D105 + `test_api.py::test_locked_registry_does_not_block_past_the_deadline` (fails on HEAD's `retrieval.py`: 5.29 s) |
 | 2026-11-20 | P10 | Admin upload with `version: 2**70` → 503 + traceback (expected 422) | sqlite3 OverflowError not caught | D97 + tests (`test_parser_rejects_bad_documents` 3 new cases, `test_admin.py::test_huge_version_is_422_not_503`) |
 | 2026-11-20 | P10 | `sanitise_request_id(b"abc\n")` kept the newline | `re.match` with `$` | D98 + `test_api.py::test_request_id_with_trailing_newline_is_replaced` |
 | 2026-11-20 | P10 | Groq `Retry-After: inf` → OverflowError in the 503 handler | `float("inf")` accepted | D99 + `test_llm.py::test_429_with_unusable_retry_after_is_ignored` (4 cases) |
@@ -977,8 +981,8 @@ Final version: `scripts/demo.sh` + `docs/DEMO.md` (P9). Steps: health (llm groq)
 - CONFIRMED, proposals (need owner approval: verifier/retrieval/pipeline):
   - P10-1 verifier is unit-blind ("2 days" passes against "2 no-shows … 7 days"); the eval's unsupported check shares the matcher;
   - P10-2 decimals ("1.5 km") always refused, and "1 km" accepted against "1.5 km";
-  - P10-3 registry lookup is a synchronous SQLite read on the event loop (blocked 5.4 s with a lock held by hand) — move into the worker thread / WAL;
-  - P10-4 empty answer with a valid citation returns 200 answered "";
+  - P10-3 registry lookup was a synchronous SQLite read on the event loop (blocked 5.4 s with a lock held by hand) — **fixed in P11 (D105)**;
+  - P10-4 empty answer with a valid citation returned 200 answered "" — **fixed in P11 (D104)**;
   - P10-5 LLM client per-phase timeout (5.9 s thread with a trickling server; user still cut at 2.8 s);
   - P10-6 eval: a 503 records `retrieved_sections=[]` → counted as a retrieval miss (no published number affected: 0 answerable first-run 503s in any committed file);
   - P10-7 no cap on section count / paragraph size at ingest (500 sections = 10 s; one 190k-char chunk); the verifier checks the full chunk while the model sees 1,500 chars;
@@ -1030,12 +1034,28 @@ Protocol: (1) write ~15 NEW cases first (3 approval-status, 3 Hinglish times, 3 
 | Date | Phase | What was done | Gate status | Commit |
 |---|---|---|---|---|
 | 2026-11-19 | Plan | Requirements, architecture, decisions D1–D24, sample data, eval design, build order written | n/a (no code) | (to be filled by owner) |
+| 2026-11-21 | P11 | Two owner-approved fixes: empty "answered" text → not_covered/unverified (D104); registry lookup off the event loop (D105, 2 lines). +9 tests. README failure table + limitations, DESIGN D13 updated; EVAL_REPORT unchanged (nothing stale). Committed Groq files checked: 0 empty answers | **green in Docker**: 454 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM 32/55), docs check all match, secret grep exit 1, key absent | (to be filled by owner) |
 | 2026-11-21 | P10 | Fresh-eyes audit: brief compliance table; repo/secret hygiene (history: 0 key-like strings, 0 real-key hits in 9 commits, no `.env` ever); independent subagent review triaged by reproduction; adversarial probes; 3 genuine bug fixes with tests (D97–D99); doc corrections (D100); image −83 MB (D101); `/docs` decision (D102); second Groq latency run (D103); demo dry run ×2 with Groq; README cold-read fixes (wait loop, first-build note, which eval file is the deliverable); fine-tuning protocol (§15, not run) | **green in Docker**: 445 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM 32/55), docs check all match, secret grep exit 1, key absent | (to be filled by owner) |
 | 2026-11-20 | P9 | Packaging and docs. Optional `CLASSIC_TLS` build arg (D90, off by default; Dockerfile + compose). README rewritten (all sections; numbers checked by `scripts/check_docs_numbers.py`, D93). `docs/EVAL_REPORT.md` condensed to a final version; `docs/DESIGN_DECISIONS.md` (20 decisions); `docs/DEMO.md` + `scripts/demo.sh`; `scripts/verify_fresh_clone.sh`. HELD-OUT freeze moved to `eval/FREEZE.md` (D91); `PROJECT_LOG.md`/`VIVA_PREP.md` git- and docker-ignored (D92); comment-only edits in `app/config.py`, `app/prompts.py`, `app/retrieval.py`; new test for the K guard (D96). Hybrid line count restated 49 → 48 (D94). Live-change rehearsal (6 changes) on scratch copies → `VIVA_PREP.md`. No behaviour change in `app/` | **green in Docker**: 436 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM 32/55), docs check 111 phrases match, secret grep exit 1, key absent | (to be filled by owner) |
 | 2026-11-20 | P1 | 4 policies (`kestrel_v1/v2`, `tamarind_v1`, `orbitron_v1`), parser `parse_policy` + `build_chunks`, `test_policies.py` (66 tests: exact sections, canaries, 45 ground-truth phrases, silent topics, v1→v2 diff, 6 parser rejections). Ground-truth table §5.1. Brief PDF added to `.gitignore`/`.dockerignore`; README notes Docker Desktop/Colima | green (see P2 evidence; P1 alone: `66 passed in 1.53s` locally) | (to be filled by owner) |
 | 2026-11-20 | P2 | `store.py` (registry, CAS flip, janitor, warm), `ingest.py` pipeline + seeding, `embeddings.py` (fast MiniLM), `scripts/ingest_cli.py`, startup = janitor → seed → warm. `test_store_ingest.py` (15) + `test_embeddings.py` (1). D31–D39 | **green in Docker**: 88 passed (online and `--network none`), eval exit 0, seeding once, restart no re-seed | (to be filled by owner) |
 | 2026-11-20 | P3 | `auth.py` (Principal, HS256-pinned verify, uniform 401, mint_token), `/dev/token` (404 unless DEV_MODE), `/whoami`, refuse-to-start log line, `scripts/issue_token.py`; `test_auth.py` (47), `test_principal_only.py` (5). Owner decisions applied: Tamarind §3 reworded; D31 comment block + same-embedder tests. Pulled forward from P7: `eval/cases.jsonl` (37), `eval/freeze.py`, `test_eval_cases.py` (40), HELD-OUT frozen (§8.5). Orbitron §7 wording, two case swaps (D48). Fixed fd exhaustion (D45). D40–D48 | **green in Docker**: 184 passed (online and `--network none`), eval exit 0. Local venv not run (§9) | (to be filled by owner) |
 | 2026-11-19/20 | P0 | Skeleton: config, `/health` + warm-up, placeholder modules, secret-scan + health tests, eval stub, Dockerfile, compose, ignore files, `.env.example`, pinned requirements + lock record, README stub. Decisions D25–D30 added. Colima/Docker installed on the machine | **Green in Docker and local venv** (evidence below) | (to be filled by owner) |
+
+#### P11 evidence (real outputs, Docker)
+```
+$ committed groq_*.jsonl (10 files) + eval_set.jsonl: answered responses with empty/whitespace/label-only text: 0 (all runs and repeats)
+$ git diff --stat: app/ask.py +5/-1; app/retrieval.py +2/-2
+$ new tests against HEAD code: locked_registry → FAIL (elapsed 5.29 s); empty-answer tests → 8 failed
+$ related files (ask, api, retrieval, hybrid, admin): 118 passed
+$ gate: up->ready 6 s, /health {"status":"ok","ready":true,"llm":"groq","dev_mode":true}
+$ docker compose run --rm api pytest -q            → 454 passed, 1 skipped, 1 warning in 134.07s
+$ docker run --rm --network none <image> pytest -q → 454 passed, 1 skipped, 1 warning in 123.19s
+$ eval (FakeLLM) → exit 0, 7 s, pass 32/55
+$ check_docs_numbers → first run: 1 mismatch (README still said 446 tests) → fixed to 455 → tests collected 455, 115 phrases (container) / 117 incl. log: all match
+$ secret grep exit 1; key: repo 0, image files 0, image env 0, server log 0 (gsk_ 0, eyJ 0), eval/results 0
+$ eval_set.jsonl 55 lines, six keys, 49 pass; HELD-OUT hash 03f8a104ff18… matches eval/FREEZE.md
+```
 
 #### P10 evidence (real outputs, Docker)
 ```

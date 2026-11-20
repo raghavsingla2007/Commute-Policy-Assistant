@@ -87,6 +87,10 @@ async def _run(principal: Principal, q: str, ctx: AskContext) -> AskResult:
     except CitationError as exc:
         return _not_covered(principal, r, "bad_citation", detail=str(exc), **common)
 
+    text = strip_labels(out.answer)                          # "" / whitespace / only "(S1)" -> nothing to show
+    if not text:
+        return _not_covered(principal, r, "unverified", cited_labels=labels, detail="empty answer", **common)
+
     cited = [r.chunks[int(lab[1:]) - 1] for lab in labels]
     problem = check_values(out.answer, [c.text for c in cited], q)
     foreign = foreign_companies(out.answer, principal.company_id)
@@ -94,7 +98,7 @@ async def _run(principal: Principal, q: str, ctx: AskContext) -> AskResult:
         detail = problem or f"names other companies {foreign}"
         return _not_covered(principal, r, "unverified", cited_labels=labels, detail=detail, **common)
 
-    return AskResult(status="answered", answer=strip_labels(out.answer), citations=render_citations(labels, r.chunks),
+    return AskResult(status="answered", answer=text, citations=render_citations(labels, r.chunks),
                      company_id=principal.company_id, policy_version=r.version, cited_labels=labels,
                      retrieved_sections=[c.section_id for c in r.chunks],
                      retrieved_companies=[c.company_id for c in r.chunks], retrieve_ms=r.retrieve_ms, **common)

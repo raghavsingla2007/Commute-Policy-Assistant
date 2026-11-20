@@ -73,7 +73,8 @@ Tests walk every route's dependencies and scan the source for request-derived co
 - *Trade-off:* false refusals on derived or oddly written values ("9 baje"). It does not check names or
   approvers.
 
-**D13 — An answer that fails the citation or grounding checks becomes "not covered", not "try again".**
+**D13 — An answer that fails the citation or grounding checks becomes "not covered", not "try again".** So
+does an "answered" reply whose text is empty, whitespace, or only a stray label like "(S1)".
 - *Alternatives:* a separate `unverified` status; 503.
 - *Why:* at temperature 0 a retry gives the same answer, so "try again" would mislead. One user-facing state
   keeps clients simple.

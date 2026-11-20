@@ -37,7 +37,7 @@ docker compose run --rm api pytest                        # 2. tests: offline, F
 docker compose run --rm api python -m eval.run_eval       # 3. eval: all 55 cases over HTTP, FakeLLM, exit 0
 ```
 
-The suite has 446 tests (one real-Groq test is skipped by default). It also passes with no network at all:
+The suite has 455 tests (one real-Groq test is skipped by default). It also passes with no network at all:
 `docker run --rm --network none commute-policy-assistant:dev pytest`.
 
 The gate eval runs with FakeLLM and writes `eval/results/fake_vector_all.jsonl` plus a `.summary.json`; FakeLLM passes
@@ -228,6 +228,8 @@ The full list, with the alternatives considered, is in [`docs/DESIGN_DECISIONS.m
 | Whole request too slow | 503 "try again" | 2.8 s overall deadline (`asyncio.wait_for`) |
 | Retrieved chunk from the wrong company or version | 503 "try again" | isolation assertion (logged loudly) |
 | Model cites an unknown label, or a number isn't in the cited text | 200 not_covered | citation check, grounding verifier |
+| Model says "answered" but its text is empty, whitespace or only a label like "(S1)" | 200 not_covered | treated as unverified (fixed after the audit; `test_ask.py::test_empty_answer_is_unverified_not_answered`) |
+| Registry database locked (e.g. mid-upgrade) | 503 "try again" within the deadline | the registry read runs in a worker thread, so the 2.8 s deadline applies (`test_api.py::test_locked_registry_does_not_block_past_the_deadline`) |
 | Policy upload fails mid-way | 500 "policy unchanged" | staging collection dropped; old version still active |
 | Process crashes mid-upload | old version answers after restart | janitor fails the stale staging row, deletes orphans |
 | Collection deleted by a concurrent upgrade | answer from the new version | re-read the registry once within the 0.5 s budget |
@@ -345,8 +347,6 @@ Details: report §6.
   7 days", because the "2" appears in the cited text. The eval's unsupported-claim check uses the same matcher, so
   it shares this blind spot.
 - Decimal values ("1.5 km") are always refused by the verifier (no current policy has decimals).
-- The registry lookup at the start of retrieval is a synchronous SQLite read on the event loop. If another
-  connection held the database lock, it could block for up to 5 s (only measured with a lock held by hand).
 - Admin uploads are bounded only by size (256 KiB, 200,000 characters). The number of sections isn't capped: 500
   sections took 10 s to ingest. A single huge paragraph becomes one chunk.
 - `/docs`, `/redoc` and `/openapi.json` stay enabled when `DEV_MODE` is off. They show route shapes only, nothing
@@ -420,7 +420,7 @@ eval/             cases.jsonl (inputs)  eval_set.jsonl (deliverable)  FREEZE.md 
 eval/results/     committed real Groq runs (*.jsonl + *.summary.json)
 docs/             EVAL_REPORT.md  DESIGN_DECISIONS.md  DEMO.md
 scripts/          demo.sh  verify_fresh_clone.sh  check_docs_numbers.py  issue_token.py  ingest_cli.py
-tests/            446 tests; conftest forces FakeLLM and an isolated data dir
+tests/            455 tests; conftest forces FakeLLM and an isolated data dir
 ```
 
 `python -m scripts.check_docs_numbers` recomputes every number in this README and the report from

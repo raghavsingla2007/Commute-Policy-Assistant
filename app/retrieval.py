@@ -206,7 +206,7 @@ async def retrieve(store: Store, principal: Principal, question: str, settings: 
     deadline = started + settings.retrieval_timeout_s
     company_id = principal.company_id                                  # the ONLY source of the company
     retriever = get_retriever(settings.retrieval_mode)
-    active = store.active_policy(company_id)
+    active = await asyncio.to_thread(store.active_policy, company_id)   # SQLite read: off the event loop
     for attempt in (1, 2):
         if active is None:
             return RetrievalResult(company_id, None, [], (time.perf_counter() - started) * 1000)
@@ -222,7 +222,7 @@ async def retrieve(store: Store, principal: Principal, question: str, settings: 
         except asyncio.TimeoutError:
             raise RetrievalTimeout(f"retrieval exceeded {settings.retrieval_timeout_s}s") from None
         except NotFoundError as exc:
-            fresh = store.active_policy(company_id)
+            fresh = await asyncio.to_thread(store.active_policy, company_id)
             if attempt == 2 or fresh is None or fresh.version == active.version:
                 raise RetrievalError(f"collection {active.collection} not found") from exc
             log.info("retrieval: %s gone (upgraded to v%s); retrying once", active.collection, fresh.version)

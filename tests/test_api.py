@@ -106,6 +106,15 @@ def test_not_covered_shape_hides_reason(client, llm):
         assert "reason" not in resp.text and "below_threshold" not in resp.text and "musings" not in resp.text
 
 
+@pytest.mark.parametrize("empty", ["", "   ", "(S1)"])
+def test_empty_answered_reply_is_not_covered_over_http(client, llm, empty):
+    llm(Scripted({"status": "answered", "answer": empty, "citations": ["S1"]}))
+    resp = ask(client)
+    body = resp.json()
+    assert resp.status_code == 200 and set(body) == ASK_KEYS
+    assert (body["status"], body["answer"], body["citations"]) == ("not_covered", messages.NOT_COVERED, [])
+
+
 # --- 401 --------------------------------------------------------------------------------------
 def test_401_same_body_and_checked_before_the_body(client):
     bodies = set()
@@ -236,6 +245,25 @@ def test_503_overall_deadline(client, llm, settings_override):
     started = time.perf_counter()
     assert_503(ask(client))
     assert time.perf_counter() - started < 0.9
+
+
+def test_locked_registry_does_not_block_past_the_deadline(client, llm, settings_override):
+    """P10 audit: the registry lookup ran on the event loop, so a locked SQLite file blocked ~5 s (its own
+    timeout) and the deadline couldn't fire. In a worker thread, the 2.8 s deadline (here 0.5 s) applies."""
+    import sqlite3
+    settings_override(request_timeout_s=0.5)
+    llm(Scripted({"status": "answered", "answer": "Escort after 10:00 PM.", "citations": ["S1"]}))
+    lock = sqlite3.connect(app.state.store.db_path, isolation_level=None)
+    lock.execute("BEGIN EXCLUSIVE")
+    try:
+        started = time.perf_counter()
+        resp = ask(client)
+        elapsed = time.perf_counter() - started
+    finally:
+        lock.execute("ROLLBACK")
+        lock.close()
+    assert_503(resp)
+    assert elapsed < 2.0, elapsed
 
 
 def test_503_unhandled_exception_logs_traceback_with_request_id(client, llm, caplog):
