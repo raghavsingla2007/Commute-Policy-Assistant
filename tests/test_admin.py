@@ -87,6 +87,13 @@ def test_invalid_document_422(client):
     assert status(client)["active_version"] == 1
 
 
+def test_huge_version_is_422_not_503(client):
+    """P10 audit: version 2**70 overflowed SQLite's INTEGER and surfaced as the catch-all 503."""
+    resp = upload(client, doc("kestrel_v2.md").replace("version: 2", f"version: {2**70}"))
+    assert resp.status_code == 422 and resp.json()["status"] == "invalid_policy"
+    assert status(client)["active_version"] == 1
+
+
 @pytest.mark.parametrize("body", [{"markdown": 5}, {"markdown": "x", "version": 2}, {"text": "x"}])
 def test_bad_body_422(client, body):
     resp = client.post("/admin/policies", headers=auth(), json=body)

@@ -268,6 +268,12 @@ def test_request_id_generated_when_absent(client):
     assert re.fullmatch(r"[0-9a-f]{32}", resp.headers["x-request-id"])
 
 
+def test_request_id_with_trailing_newline_is_replaced():
+    """P10 audit: re.match with `$` accepted "abc\n" (reachable over raw ASGI, not over HTTP/1.1)."""
+    from app.middleware import sanitise_request_id
+    assert sanitise_request_id(b"abc\n") != "abc\n" and sanitise_request_id(b"abc") == "abc"
+
+
 def test_safe_client_request_id_is_echoed(client):
     resp = ask(client, headers={"X-Request-ID": "demo-42.a_b"})
     assert resp.headers["x-request-id"] == "demo-42.a_b" == resp.json()["request_id"]

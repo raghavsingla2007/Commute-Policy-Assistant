@@ -40,7 +40,7 @@ def body_limit(path: str) -> int:
 
 def sanitise_request_id(raw: bytes | None) -> str:
     value = raw.decode("latin-1") if raw else ""
-    return value if _SAFE_ID.match(value) else uuid.uuid4().hex
+    return value if _SAFE_ID.fullmatch(value) else uuid.uuid4().hex   # fullmatch: "$" alone accepts a trailing \n
 
 
 def json_message(status: int, body: dict, request_id: str, extra_headers: list | None = None) -> tuple[dict, dict]:

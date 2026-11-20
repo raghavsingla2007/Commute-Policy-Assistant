@@ -68,6 +68,13 @@ def test_json_wrapped_in_code_fences_is_unwrapped():
 
 
 # --- Groq: every failure becomes LLMUnavailable with a cause -------------------------------
+@pytest.mark.parametrize("value", ["inf", "nan", "-3", "soon"])
+def test_429_with_unusable_retry_after_is_ignored(value):
+    """P10 audit: Retry-After "inf" made math.ceil raise inside the 503 handler (catch-all 503 instead)."""
+    err = failure(groq(lambda r: httpx.Response(429, headers={"retry-after": value}, json={"error": {}})))
+    assert (err.cause, err.retry_after) == ("rate_limited", None)
+
+
 def test_429_with_retry_after():
     err = failure(groq(lambda r: httpx.Response(429, headers={"retry-after": "7"}, json={"error": {}})))
     assert (err.cause, err.retry_after) == ("rate_limited", 7.0)

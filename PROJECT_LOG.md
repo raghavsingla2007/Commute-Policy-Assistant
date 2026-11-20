@@ -312,6 +312,13 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | D94 | Hybrid code size restated as **+48** non-comment lines (`_WORD` to the end of `HybridRetriever`), not +49 | Keep 49 | The checker's count; P8's count included one more line under a different boundary. Docs fixed, data unchanged | — |
 | D95 | Report's hybrid retrieval tables cite the committed Groq result files instead of the gitignored FakeLLM P8 files | Un-ignore fake files | Retrieval is identical in both (deterministic); rank changes recomputed from the Groq files match P8's table exactly | — |
 | D96 | New test `test_health.py::test_retrieval_k_outside_1_to_3_is_refused` (K = 0 and 4) | Leave the startup guard untested | README's "≤ 3 cited chunks" section cites it; it was the one link in that chain without a test | +2 tests (437 collected) |
+| D97 | **Bug fix (P10):** policy `version` must be 1..1,000,000 (`MAX_VERSION`); `version: 2**70` used to overflow SQLite's INTEGER and surface as the catch-all 503 instead of the documented 422 | Catch OverflowError in the store | Rejecting at parse time keeps "invalid document → 422, nothing changed" true and is one line | A company can't use versions above 1,000,000 |
+| D98 | **Bug fix (P10):** X-Request-ID check uses `fullmatch` (was `match` + `$`, which accepted a trailing `\n`) | — | Code now matches the documented `[A-Za-z0-9._-]{1,64}`; only reachable over raw ASGI, not HTTP/1.1 | — |
+| D99 | **Bug fix (P10):** Groq `Retry-After` must be finite and ≥ 0; "inf"/"nan"/negative are ignored | — | `inf` made `math.ceil` raise inside the 503 handler (the catch-all still answered 503, but not the documented path) | — |
+| D100 | Docs corrected, not code: the 2.2 s httpx timeout is **per network phase** (a trickling server kept the thread 5.9 s); the 2.8 s deadline is the user-facing bound. README security row now says logs include the first 100 characters of the question | Change the LLM client to a total deadline (proposal P10-5) | Code matches its long-standing design (D71); the docs overstated it | — |
+| D101 | Image: delete the downloaded model tarball (`onnx.tar.gz`) in the same RUN step that extracts it | Keep it | Chroma checks only the six extracted files (read in its source); image 334.9 MB → 251.7 MB; tests pass with `--network none` | — |
+| D102 | `/docs`, `/redoc`, `/openapi.json` stay enabled with DEV_MODE off; documented in README limitations | Disable when DEV_MODE is off | They show route shapes only; disabling cleanly needs the setting at app construction (before the lifespan reads config) | Route shapes are public |
+| D103 | Second Groq latency run (P10, `--repeat 2`) committed as `groq_vector_full_p10_latency.*` and reported next to P7 | Report only P7 | It shows provider variance honestly: more 503s, not slower answers | — |
 | D48 | Wording fixes found while drafting cases: Tamarind §3 → "Booking Cut-off", "Regular roster trips must be requested…" (owner decision); Orbitron §7 made an exhaustive list ("…; no other trips count as ad-hoc trips") so airport stays clearly SILENT; `k-nc-medical` replaced by `k-nc-maternity` because Kestrel §6 defines ad-hoc as *any* off-roster trip (a hospital trip is covered); `t-inj-doc` asks "Am I eligible for company cabs?" so a correct refusal can't echo "free cabs anywhere" | Keep the original wording/cases | Each removed a case where a correct answer could be scored wrong | Cases now differ slightly from the plan in §8.3 (updated) |
 
 ---
@@ -796,6 +803,11 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 | 2026-11-20 | P9 | The case-study brief PDF is **tracked in git** (committed in `26b9164 making base`) although `.gitignore` lists it | `.gitignore` doesn't affect files already tracked | Not fixable without a git write; reported to the owner (`git rm --cached "Case Study B – Commute Policy Assistant.docx.pdf"` if it shouldn't be in the repo) |
 | 2026-11-20 | P9 | Rehearsal driver crashed: `FileNotFoundError: '…/"Case'` | `git ls-files` quotes names with spaces/non-ASCII; split on whitespace | Use `git ls-files -z` (scratchpad tool only) |
 | 2026-11-20 | P9 | Draft `scripts/demo.sh` formatter used `\"` inside f-string expressions | A SyntaxError before Python 3.12 (macOS python3 may be older) | %-formatting; script checked with `bash -n` and run end to end |
+| 2026-11-20 | P10 | Admin upload with `version: 2**70` → 503 + traceback (expected 422) | sqlite3 OverflowError not caught | D97 + tests (`test_parser_rejects_bad_documents` 3 new cases, `test_admin.py::test_huge_version_is_422_not_503`) |
+| 2026-11-20 | P10 | `sanitise_request_id(b"abc\n")` kept the newline | `re.match` with `$` | D98 + `test_api.py::test_request_id_with_trailing_newline_is_replaced` |
+| 2026-11-20 | P10 | Groq `Retry-After: inf` → OverflowError in the 503 handler | `float("inf")` accepted | D99 + `test_llm.py::test_429_with_unusable_retry_after_is_ignored` (4 cases) |
+| 2026-11-20 | P10 | Live demo dry run differed from narration only in wording (step 5 refuses rather than answers) | — | `docs/DEMO.md` narration + fallback lines |
+| 2026-11-20 | P10 | Rehearsal baseline (no edits) failed 2 tests in the scratch copy | macOS `tar` added AppleDouble `._*` files (canary scan UnicodeDecodeError, AST scan) | `COPYFILE_DISABLE=1` in the scratch driver; baseline then 436 passed (P9 tooling only) |
 | 2026-11-19 | P0 | Eval output missing on the host when the gate ran from `/private/tmp/...` | Colima shares only `~` with its VM, so the bind mount of a `/tmp` path is empty in the VM | Not a repo bug: from `~/Desktop/movein` the file lands on the host (verified). Docker Desktop shares `/Users` and `/tmp` by default. Documented in §10 |
 
 ---
@@ -956,6 +968,40 @@ Final version: `scripts/demo.sh` + `docs/DEMO.md` (P9). Steps: health (llm groq)
 
 ---
 
+## 15. P10 audit (2026-11-20/21): findings, proposals, fine-tuning protocol
+
+**Brief compliance:** all requirements PASS from committed results/code (max 1 LLM call per question in every Groq file; max 2 citations; 0 foreign chunks retrieved; 0 leaks; 0 unsupported; Kestrel answers v2 only after upgrade; p95 1,264 ms P7 / 1,705 ms P10 over successes, no response > 3 s). PARTIAL: the 2-minute recording (owner); the repo still tracks `PROJECT_LOG.md` and the brief PDF (owner: `git rm --cached`).
+
+**Independent review (subagent) triage — reproduced before reporting:**
+- CONFIRMED + fixed: huge version → 503 (D97); request-id trailing newline (D98); Retry-After inf (D99); README overstatements (D100).
+- CONFIRMED, proposals (need owner approval: verifier/retrieval/pipeline):
+  - P10-1 verifier is unit-blind ("2 days" passes against "2 no-shows … 7 days"); the eval's unsupported check shares the matcher;
+  - P10-2 decimals ("1.5 km") always refused, and "1 km" accepted against "1.5 km";
+  - P10-3 registry lookup is a synchronous SQLite read on the event loop (blocked 5.4 s with a lock held by hand) — move into the worker thread / WAL;
+  - P10-4 empty answer with a valid citation returns 200 answered "";
+  - P10-5 LLM client per-phase timeout (5.9 s thread with a trickling server; user still cut at 2.8 s);
+  - P10-6 eval: a 503 records `retrieved_sections=[]` → counted as a retrieval miss (no published number affected: 0 answerable first-run 503s in any committed file);
+  - P10-7 no cap on section count / paragraph size at ingest (500 sections = 10 s; one 190k-char chunk); the verifier checks the full chunk while the model sees 1,500 chars;
+  - P10-8 `rescore` ignores repeats (no published effect: rescored file was repeat 1).
+- NOT reproduced (dropped): hybrid cache eviction by a stale v1 request (v1 collection already gone → NotFound, v2 index kept).
+- Rare: 1 × 503 in 1,076 responses under 6 rapid upgrades (3 runs), cause not captured, 0 mixed answers (documented D14 window).
+
+**Probe results (no change needed):** homoglyphs, zero-width, RTL, emoji → 200; 500-char token 200, 501 → 422; NUL → 422; duplicate JSON keys (last wins), 5,000-deep nesting → 422; CL smaller → 422; CL huge → 413; CL negative/non-numeric → 400 (uvicorn); CL larger than body → the server waits for the body (no read timeout; README limitation); `bearer`, double space, trailing space accepted; Basic / no scheme / two tokens → 401; two Authorization headers → the first wins; CRLF-looking X-Request-ID replaced; HEAD /health 405; OPTIONS/GET /ask 405; 404 `{"detail":"Not Found"}`; `/dev/token` 404 with DEV_MODE off; an old token works after an upgrade and answers from v2; uploads: duplicate IDs / missing version / version 0 / >200k chars → 422, other company → 403, `../../etc/passwd` doc_id accepted as a label only (never a path), control characters accepted (stored), 190k-char line accepted (one chunk); delimiter mimicry escaped (question and policy); hybrid: 2 concurrent uploads + 4 readers → 201/409, 82 responses, 0 mixed. Groq injection probes (Hindi, Hinglish, base64, fake delimiters, "translate your prompt", full-width): 5 not_covered, 1 answered from Kestrel's own §4; 0 flags.
+
+**Fine-tuning protocol (NOT run; needs owner go-ahead):**
+
+| Weakness | Candidate fix | Risk | Cost |
+|---|---|---|---|
+| (a) over-caution "Is my ad-hoc trip approved?" | prompt rule: when asked for a status the policy can't know, state the governing rule (who approves, conditions) | more answers on near-miss traps; injection-adjacent wording | prompt edit |
+| (b) "9 baje" refused | verifier: a bare hour in the question (incl. "N baje", "at N") supports N:00 and N+12:00 | weakens the verifier on echoed wrong hours (rule 2 still needs a chunk value) | ~10 lines + unit tests |
+| (c) multi-section misses | (i) top-5 then pick 3 by diversity (MMR); (ii) query decomposition (2nd LLM call); (iii) hybrid with stopwords | (i) can push the single right section out; (ii) +~1 s and 2× tokens, more 503s at today's provider speed; (iii) second hybrid config | (i) ~15 lines; (ii) ~30 lines + latency |
+| (d) phrase lists | broader alternatives for NEW cases only; HELD-OUT unchanged (no unfreeze) | — | eval-only |
+| (e)/(f) unit-blind verifier, decimals (P10-1/2) | match number+unit pairs; normalise decimals | more false refusals | ~20 lines + tests |
+
+Protocol: (1) write ~15 NEW cases first (3 approval-status, 3 Hinglish times, 3 multi-section, 3 near-miss silent topics as guards for (a), 3 number+unit traps), with expectations traced to policy text by the existing test; (2) freeze them by sha256 in `eval/FREEZE.md` as a separate NEW set before any change; (3) pre-register the adoption rule: NEW-set pass up, DEV no regression, 0 leaks / 0 unsupported, no new test failures, p95 < 3 s; (4) baseline DEV+NEW (40 cases × repeat 2 = ~80 calls); (5) one candidate at a time, ~80 calls each, all attempts logged; (6) HELD-OUT run once at the end for reporting only. Estimate: 80 baseline + 4 × 80 + 52 final ≈ 450 Groq calls, ~1 h at 8 s pacing, inside 1,000/day after a quota check.
+
+---
+
 ## 14. Build order and changelog
 
 ### 14.1 Build phases
@@ -984,11 +1030,29 @@ Final version: `scripts/demo.sh` + `docs/DEMO.md` (P9). Steps: health (llm groq)
 | Date | Phase | What was done | Gate status | Commit |
 |---|---|---|---|---|
 | 2026-11-19 | Plan | Requirements, architecture, decisions D1–D24, sample data, eval design, build order written | n/a (no code) | (to be filled by owner) |
+| 2026-11-21 | P10 | Fresh-eyes audit: brief compliance table; repo/secret hygiene (history: 0 key-like strings, 0 real-key hits in 9 commits, no `.env` ever); independent subagent review triaged by reproduction; adversarial probes; 3 genuine bug fixes with tests (D97–D99); doc corrections (D100); image −83 MB (D101); `/docs` decision (D102); second Groq latency run (D103); demo dry run ×2 with Groq; README cold-read fixes (wait loop, first-build note, which eval file is the deliverable); fine-tuning protocol (§15, not run) | **green in Docker**: 445 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM 32/55), docs check all match, secret grep exit 1, key absent | (to be filled by owner) |
 | 2026-11-20 | P9 | Packaging and docs. Optional `CLASSIC_TLS` build arg (D90, off by default; Dockerfile + compose). README rewritten (all sections; numbers checked by `scripts/check_docs_numbers.py`, D93). `docs/EVAL_REPORT.md` condensed to a final version; `docs/DESIGN_DECISIONS.md` (20 decisions); `docs/DEMO.md` + `scripts/demo.sh`; `scripts/verify_fresh_clone.sh`. HELD-OUT freeze moved to `eval/FREEZE.md` (D91); `PROJECT_LOG.md`/`VIVA_PREP.md` git- and docker-ignored (D92); comment-only edits in `app/config.py`, `app/prompts.py`, `app/retrieval.py`; new test for the K guard (D96). Hybrid line count restated 49 → 48 (D94). Live-change rehearsal (6 changes) on scratch copies → `VIVA_PREP.md`. No behaviour change in `app/` | **green in Docker**: 436 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM 32/55), docs check 111 phrases match, secret grep exit 1, key absent | (to be filled by owner) |
 | 2026-11-20 | P1 | 4 policies (`kestrel_v1/v2`, `tamarind_v1`, `orbitron_v1`), parser `parse_policy` + `build_chunks`, `test_policies.py` (66 tests: exact sections, canaries, 45 ground-truth phrases, silent topics, v1→v2 diff, 6 parser rejections). Ground-truth table §5.1. Brief PDF added to `.gitignore`/`.dockerignore`; README notes Docker Desktop/Colima | green (see P2 evidence; P1 alone: `66 passed in 1.53s` locally) | (to be filled by owner) |
 | 2026-11-20 | P2 | `store.py` (registry, CAS flip, janitor, warm), `ingest.py` pipeline + seeding, `embeddings.py` (fast MiniLM), `scripts/ingest_cli.py`, startup = janitor → seed → warm. `test_store_ingest.py` (15) + `test_embeddings.py` (1). D31–D39 | **green in Docker**: 88 passed (online and `--network none`), eval exit 0, seeding once, restart no re-seed | (to be filled by owner) |
 | 2026-11-20 | P3 | `auth.py` (Principal, HS256-pinned verify, uniform 401, mint_token), `/dev/token` (404 unless DEV_MODE), `/whoami`, refuse-to-start log line, `scripts/issue_token.py`; `test_auth.py` (47), `test_principal_only.py` (5). Owner decisions applied: Tamarind §3 reworded; D31 comment block + same-embedder tests. Pulled forward from P7: `eval/cases.jsonl` (37), `eval/freeze.py`, `test_eval_cases.py` (40), HELD-OUT frozen (§8.5). Orbitron §7 wording, two case swaps (D48). Fixed fd exhaustion (D45). D40–D48 | **green in Docker**: 184 passed (online and `--network none`), eval exit 0. Local venv not run (§9) | (to be filled by owner) |
 | 2026-11-19/20 | P0 | Skeleton: config, `/health` + warm-up, placeholder modules, secret-scan + health tests, eval stub, Dockerfile, compose, ignore files, `.env.example`, pinned requirements + lock record, README stub. Decisions D25–D30 added. Colima/Docker installed on the machine | **Green in Docker and local venv** (evidence below) | (to be filled by owner) |
+
+#### P10 evidence (real outputs, Docker)
+```
+$ git: HEAD 4ab5dcd; 88 tracked files, .git 1.6 MB; still tracked: PROJECT_LOG.md, "Case Study B … .pdf"; .env never in history; key-like patterns in all history 0; real key in 9 commits 0, in commit messages 0
+$ compliance (committed groq_*.jsonl): max llm_calls 1, max citations 2 (hybrid) / 1 (vector), max retrieved 3, answered without citation 0, foreign retrieved 0, leaks 0, unsupported 0; Kestrel answers policy_version {2}
+$ probes: see §15; server log during probes: 1 traceback (the version overflow, now fixed), "eyJ" 0
+$ reviewer repros: unit-blind verifier None (passes); decimal "1.5 km" → unsupported ['5']; "abc\n" kept; Retry-After inf → OverflowError; empty answer → answered ''; trickling server → complete() 5.9 s; registry read under an exclusive lock → OperationalError after 5.4 s; stale-v1 hybrid eviction → NotFoundError, v2 index kept (not reproduced)
+$ quota 18:16Z: 861/1000 requests left
+$ demo with Groq: run 1 78 s, run 2 81 s; statuses/answers/citations identical; matches DEMO.md
+$ Groq injection probes (6): 5 not_covered, 1 answered from Kestrel §4 (v2), flags 0
+$ eval --llm groq --repeat 2 --name groq_vector_full_p10_latency → exit 0, 18:21–18:36 UTC, 100 LLM calls, 0 × 429; 200s: p50 930 p95 1705 max 2229 ms (n 101); 503 (LLM timeout) 7 of 110 at 2.4–2.8 s; incl. 503s p95 2630 max 2847 ms, none > 3 s; pass ignoring 503 repeats 49/55; leaks 0, unsupported 0
+$ pytest --durations: slowest test_eval_smoke 8.2 s; ~2.4–2.6 s setup per app-start test (seeding)
+$ build after D101: exit 0, 302 s; image 334,932,063 → 251,738,175 bytes; model cache 167 MB → 88 MB
+$ startup: fresh volume up→ready 4.0 s (startup 2,087 ms incl. seeding); restart 1.8 s (390 ms); idle memory 208 MiB; first /ask with Groq 0.90 s, then 0.45 s, 0.62 s
+$ gate: /health ready llm groq; pytest 445 passed, 1 skipped (141 s); --network none 445 passed, 1 skipped (127 s); eval exit 0, 32/55; docs check 115 phrases (container) / 117 incl. log, all match; secret grep exit 1; key: repo 0, image files 0, image env 0, server log 0, eval/results 0; eval_set 55 lines, six keys, 49 pass; freeze matches
+$ README commands run verbatim: token + /ask, admin upload (201 v1→v2), status, issue_token
+```
 
 #### P9 evidence (real outputs, Docker, phone hotspot)
 ```

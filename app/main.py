@@ -210,8 +210,8 @@ def unavailable(principal: Principal, request_id: str, retry_after: float | None
 async def ask(req: AskRequest, request: Request, principal: Principal = Depends(require_principal)) -> JSONResponse:
     """The whole pipeline runs under one deadline (REQUEST_TIMEOUT_S = 2.8 s). Its blocking steps
     (embedding + Chroma, the Groq call) already run in worker threads; on timeout the coroutine is
-    cancelled and we answer 503 at once. A worker thread can't be killed: it finishes on its own
-    (Groq's client times out at 2.2 s) and its result is thrown away."""
+    cancelled and we answer 503 at once. A worker thread can't be killed: it finishes on its own (httpx's
+    2.2 s timeout is per network phase, so a trickling server can keep it longer) and its result is thrown away."""
     request_id = rid(request)
     if app.state.store is None:
         return unavailable(principal, request_id)

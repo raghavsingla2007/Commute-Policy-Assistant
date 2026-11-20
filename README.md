@@ -15,6 +15,9 @@ docker compose up
 That is the only command. The app starts on `http://localhost:8000`, seeds three fictional companies'
 policies (Kestrel, Tamarind, Orbitron, all v1), and reports ready on `GET /health`.
 
+The **first** run builds the image. It downloads Python packages and the embedding model (several hundred MB),
+so it is network-bound: 8–11 minutes on a phone hotspot in testing. Later starts take seconds.
+
 - **No API key needed.** Without a key the app uses **FakeLLM** and logs a warning. FakeLLM is a
   deterministic stand-in that answers with the top excerpt. It proves the pipeline works, but it can't judge
   when a policy is silent.
@@ -28,15 +31,20 @@ policies (Kestrel, Tamarind, Orbitron, all v1), and reports ready on `GET /healt
 ## The three gate commands
 
 ```bash
-docker compose up -d && curl -s localhost:8000/health    # 1. start: {"status":"ok","ready":true,"llm":"fake","dev_mode":true}
+docker compose up -d                                      # 1. start (builds the image on the first run)
+until curl -sf localhost:8000/health; do sleep 2; done    #    wait: {"status":"ok","ready":true,"llm":"fake","dev_mode":true}
 docker compose run --rm api pytest                        # 2. tests: offline, FakeLLM, no key needed
 docker compose run --rm api python -m eval.run_eval       # 3. eval: all 55 cases over HTTP, FakeLLM, exit 0
 ```
 
-The suite has 437 tests (one real-Groq test is skipped by default). It also passes with no network at all:
-`docker run --rm --network none commute-policy-assistant:dev pytest`. The eval writes
-`eval/results/fake_vector_all.jsonl` and a `.summary.json`. Real-LLM eval: add `--llm groq` (needs the key; paced
-at 8 s per call for the free tier, about 8 minutes for 55 cases).
+The suite has 446 tests (one real-Groq test is skipped by default). It also passes with no network at all:
+`docker run --rm --network none commute-policy-assistant:dev pytest`.
+
+The gate eval runs with FakeLLM and writes `eval/results/fake_vector_all.jsonl` plus a `.summary.json`; FakeLLM passes
+32/55 by design. The submitted evaluation set, `eval/eval_set.jsonl`, comes from the real Groq run instead (49/55, see
+[Evaluation summary](#evaluation-summary)). To run with the real LLM:
+`docker compose run --rm api python -m eval.run_eval --llm groq` (needs the key; paced at 8 s per call for the free
+tier, about 8 minutes for 55 cases).
 
 ## Calling the API
 
@@ -206,7 +214,7 @@ The full list, with the alternatives considered, is in [`docs/DESIGN_DECISIONS.m
 | Prompt injection in a policy or the question | excerpts quoted as data with `<>&` escaped; strict schema; citation check; verifier; foreign-company check | `test_prompts.py`, `test_ask.py`; eval `injection` cases |
 | Invented citation or wrong number | labels only; verifier against the cited text | `test_grounding.py`, `test_ask.py::test_bad_citations_become_not_covered` |
 | Internal details in errors | fixed messages; 422 never echoes input; catch-all 503 | `test_api.py::test_422_plain_message_no_echo`, `test_api.py::test_503_*` |
-| Tokens or keys in logs | logs carry ids, company, status, reason and timings only | `test_auth.py::test_reason_logged_but_token_never_logged` |
+| Tokens or keys in logs | logs carry request id, company, status, reason, timings and the first 100 characters of the question; never tokens, keys or the Authorization header | `test_auth.py::test_reason_logged_but_token_never_logged` |
 | Committed secrets | `.gitignore`/`.dockerignore` + secret-scan test | `test_no_secrets.py` |
 | Oversized body | 413 over 16 KiB (`/ask`) or 256 KiB (`/admin`), declared or streamed | `test_api.py::test_413_*` |
 | Dev token endpoint in production | off by default (404); refuses to start with the default secret | `test_auth.py::test_dev_token_is_404_when_dev_mode_off` |
@@ -215,7 +223,7 @@ The full list, with the alternatives considered, is in [`docs/DESIGN_DECISIONS.m
 
 | What fails | User sees | Mechanism |
 |---|---|---|
-| Groq timeout, 429, 5xx, network, malformed or truncated output | 503 "try again", `Retry-After` | 2.2 s client timeout; no retry inside the request |
+| Groq timeout, 429, 5xx, network, malformed or truncated output | 503 "try again", `Retry-After` | 2.2 s httpx timeout per network phase (connect, each read); no retry inside the request |
 | Retrieval slow or errors | 503 "try again" | 0.5 s retrieval timeout |
 | Whole request too slow | 503 "try again" | 2.8 s overall deadline (`asyncio.wait_for`) |
 | Retrieved chunk from the wrong company or version | 503 "try again" | isolation assertion (logged loudly) |
@@ -225,7 +233,9 @@ The full list, with the alternatives considered, is in [`docs/DESIGN_DECISIONS.m
 | Collection deleted by a concurrent upgrade | answer from the new version | re-read the registry once within the 0.5 s budget |
 | Any unhandled exception | 503, no stack trace | middleware catch-all; traceback logged with the request id |
 
-Timeouts in order: 0.5 s retrieval, 2.2 s LLM, 2.8 s overall.
+Timeouts in order: 0.5 s retrieval, 2.2 s LLM, 2.8 s overall. The 2.8 s deadline is the one the user feels. The 2.2 s httpx
+timeout applies per network phase, so a server that trickles bytes can keep the worker thread busy longer (measured: 5.9 s).
+The user still gets 503 at 2.8 s, and the thread's result is discarded.
 
 ## Evaluation summary
 
@@ -251,6 +261,10 @@ Latency, `--repeat 3` (`eval/results/groq_vector_full_p7_latency.jsonl`):
 - client wall clock p50 766 ms, **p95 1,264 ms**, max 2,148 ms over 161 successful responses;
 - 0 rate-limit errors; one Groq timeout returned 503;
 - **meets the 3 s p95 target.**
+
+A second run at a busier time (`eval/results/groq_vector_full_p10_latency.jsonl`, `--repeat 2`) gave p95 1,705 ms
+over the successful responses. 7 of 110 requests timed out with 503 "try again". No response took over 3 s, and
+answer quality was unchanged.
 
 Read these numbers with care:
 - **n is small.** One case is 3–4 percentage points.
@@ -327,6 +341,18 @@ Details: report §6.
 - The JWT is HS256 with a shared secret (mock issuer); production would use RS256/ES256.
 - The container runs as root, which avoids bind-mount permission failures in the gate.
 - The eval's HTTP path is FastAPI's in-process TestClient, not a real network socket.
+- **The verifier matches numbers, not units.** "Suspended for 2 days" passes against a chunk saying "2 no-shows …
+  7 days", because the "2" appears in the cited text. The eval's unsupported-claim check uses the same matcher, so
+  it shares this blind spot.
+- Decimal values ("1.5 km") are always refused by the verifier (no current policy has decimals).
+- The registry lookup at the start of retrieval is a synchronous SQLite read on the event loop. If another
+  connection held the database lock, it could block for up to 5 s (only measured with a lock held by hand).
+- Admin uploads are bounded only by size (256 KiB, 200,000 characters). The number of sections isn't capped: 500
+  sections took 10 s to ingest. A single huge paragraph becomes one chunk.
+- `/docs`, `/redoc` and `/openapi.json` stay enabled when `DEV_MODE` is off. They show route shapes only, nothing
+  secret; production would disable them.
+- `HEAD /health` returns 405 (use GET). The 2.8 s deadline starts after the request body has been read, so slow
+  clients should be cut off by a reverse proxy.
 - Tested on macOS arm64 (Docker via Colima). Not tested on x86_64.
 
 ## Troubleshooting
@@ -394,7 +420,7 @@ eval/             cases.jsonl (inputs)  eval_set.jsonl (deliverable)  FREEZE.md 
 eval/results/     committed real Groq runs (*.jsonl + *.summary.json)
 docs/             EVAL_REPORT.md  DESIGN_DECISIONS.md  DEMO.md
 scripts/          demo.sh  verify_fresh_clone.sh  check_docs_numbers.py  issue_token.py  ingest_cli.py
-tests/            437 tests; conftest forces FakeLLM and an isolated data dir
+tests/            446 tests; conftest forces FakeLLM and an isolated data dir
 ```
 
 `python -m scripts.check_docs_numbers` recomputes every number in this README and the report from

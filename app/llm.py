@@ -9,6 +9,7 @@ Rules:
 
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass
 from typing import Protocol
@@ -134,10 +135,12 @@ class GroqLLM:
 
 
 def _float_or_none(value: str | None) -> float | None:
+    """A usable Retry-After in seconds, or None. "inf"/"nan"/negative are ignored (inf broke math.ceil)."""
     try:
-        return float(value) if value is not None else None
+        number = float(value) if value is not None else None
     except ValueError:
         return None
+    return number if number is not None and math.isfinite(number) and number >= 0 else None
 
 
 def _error_code(resp: httpx.Response) -> str:

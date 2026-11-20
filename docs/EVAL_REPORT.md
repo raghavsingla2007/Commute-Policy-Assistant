@@ -104,6 +104,16 @@ p95 1,264 ms **meets the ≤ 3 s target**. One Groq call timed out: the user got
 
 Key facts changed in **0** cases; wording differed in 10 cases.
 
+**Second latency run** (P10, 2026-11-20 18:21–18:36 UTC, `groq_vector_full_p10_latency.jsonl`, `--repeat 2`, 110
+requests). Groq was slower than in the first run:
+- **Successful responses:** over 101 of them, p50 930 ms, p95 1,705 ms, max 2,229 ms.
+- **Timeouts:** 7 of 110 requests timed out and got 503 "try again" after 2.4–2.8 s.
+- **Including the timeouts:** p95 is 2,630 ms, and no response took over 3 s.
+- **Quality:** ignoring the timed-out repeats, 49/55 cases pass, the same as the first run, with 0 leaks and
+  0 unsupported claims.
+
+So the 3 s bound held, but a slower provider shows up as more "try again", not as slower answers.
+
 **FakeLLM** (pipeline check only, produced by the gate's eval command; not committed): it fails almost every
 not-covered case by design, with 0 leaks and 0 unsupported claims.
 

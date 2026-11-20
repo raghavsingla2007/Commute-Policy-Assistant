@@ -24,7 +24,10 @@ RUN if [ "$CLASSIC_TLS" = "1" ]; then \
     fi \
     && pip install -r requirements.txt \
     && python -c "from chromadb.utils.embedding_functions import DefaultEmbeddingFunction as E; E()(['warm-up'])" \
-    && rm -f /tmp/classic-tls.cnf
+    && rm -f /tmp/classic-tls.cnf \
+    && rm -f /root/.cache/chroma/onnx_models/*/onnx.tar.gz
+# ^ Chroma checks only the extracted model files, never the downloaded archive, so deleting it saves ~83 MB
+#   without changing behaviour (tests run with --network none afterwards).
 
 COPY . .
 

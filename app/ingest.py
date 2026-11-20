@@ -20,6 +20,7 @@ SECTION_RE = re.compile(r"^##\s+(\d+(?:\.\d+)*)\s+(.+?)\s*$")
 REQUIRED_HEADER = ("company_id", "doc_id", "version")
 MAX_CHUNK_CHARS = 800      # longer sections are split on paragraph boundaries
 MAX_POLICY_CHARS = 200_000
+MAX_VERSION = 1_000_000   # versions are small integers; a huge one overflowed SQLite (503, not 422)
 ADD_BATCH_SIZE = 5         # chunks are written to Chroma in small batches
 
 
@@ -97,8 +98,8 @@ def parse_policy(markdown: str) -> ParsedPolicy:
         version = int(header["version"])
     except ValueError as exc:
         raise PolicyParseError("version must be an integer") from exc
-    if version < 1:
-        raise PolicyParseError("version must be >= 1")
+    if not 1 <= version <= MAX_VERSION:
+        raise PolicyParseError(f"version must be between 1 and {MAX_VERSION}")
     if not sections:
         raise PolicyParseError("no '## <num> <title>' sections found")
     ids = [s.section_id for s in sections]

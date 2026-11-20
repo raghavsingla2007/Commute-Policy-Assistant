@@ -83,6 +83,9 @@ Tests walk every route's dependencies and scan the source for request-derived co
 - *Alternatives:* retry on 429 or timeout.
 - *Why:* a retry can't fit in 3 s; a fast, honest "try again" with `Retry-After` beats a slow answer.
 - *Trade-off:* transient Groq blips reach the user. A timed-out worker thread finishes in the background.
+  The 2.2 s httpx timeout is per network phase (connect, each read), not a total, so a trickling reply can
+  keep that thread alive longer (5.9 s measured in the audit). The 2.8 s deadline still bounds what the user
+  waits.
 
 **D57 — Groq `openai/gpt-oss-20b` over plain httpx.** JSON mode, temperature 0, `reasoning_effort=low`,
 300 completion tokens.
