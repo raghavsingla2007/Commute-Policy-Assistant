@@ -73,7 +73,7 @@ def load_settings() -> Settings:
     return Settings(
         llm_provider=env("LLM_PROVIDER", "groq").strip().lower(),
         groq_api_key=env("GROQ_API_KEY", "").strip(),
-        llm_model=env("LLM_MODEL", "openai/gpt-oss-20b"),   # checked 2026-11-20, PROJECT_LOG §3.5
+        llm_model=env("LLM_MODEL", "openai/gpt-oss-20b"),   # checked 2026-11-20, docs/DESIGN_DECISIONS.md D57
         llm_timeout_s=float(env("LLM_TIMEOUT_S", "2.2")),
         llm_max_tokens=int(env("LLM_MAX_TOKENS", "300")),
         llm_reasoning_effort=env("LLM_REASONING_EFFORT", "low").strip().lower(),
@@ -86,7 +86,7 @@ def load_settings() -> Settings:
         policies_dir=Path(env("POLICIES_DIR", str(PROJECT_ROOT / "data" / "policies"))),
         retrieval_k=int(env("RETRIEVAL_K", "3")),
         retrieval_mode=env("RETRIEVAL_MODE", "vector").strip().lower(),
-        not_covered_min_sim=float(env("NOT_COVERED_MIN_SIM", "0.15")),  # chosen on DEV, PROJECT_LOG §8.6
+        not_covered_min_sim=float(env("NOT_COVERED_MIN_SIM", "0.15")),  # chosen on DEV, docs/DESIGN_DECISIONS.md D52
         retrieval_timeout_s=float(env("RETRIEVAL_TIMEOUT_S", "0.5")),
         request_timeout_s=float(env("REQUEST_TIMEOUT_S", "2.8")),
         max_question_chars=int(env("MAX_QUESTION_CHARS", "500")),

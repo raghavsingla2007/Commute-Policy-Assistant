@@ -29,3 +29,7 @@ eval/results/*
 
 # Case-study brief: kept locally, not committed
 /Case Study B*.pdf
+
+# Private working notes (owner's default; not part of the submission)
+PROJECT_LOG.md
+VIVA_PREP.md

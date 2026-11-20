@@ -25,3 +25,11 @@ def test_dev_default_secret_rejected_when_dev_mode_off(monkeypatch):
     monkeypatch.setenv("JWT_SECRET", DEV_DEFAULT_JWT_SECRET)
     with pytest.raises(ValueError, match="dev default"):
         load_settings().validate()
+
+
+@pytest.mark.parametrize("k", ["0", "4"])
+def test_retrieval_k_outside_1_to_3_is_refused(monkeypatch, k):
+    """The 3-cited-chunks cap starts here: the app refuses to start with RETRIEVAL_K outside 1..3."""
+    monkeypatch.setenv("RETRIEVAL_K", k)
+    with pytest.raises(ValueError, match="between 1 and 3"):
+        load_settings().validate()

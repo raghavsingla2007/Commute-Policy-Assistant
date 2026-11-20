@@ -62,15 +62,15 @@ def test_expected_values_come_from_the_policy_text(case):
 
 
 def frozen_hashes() -> list[str]:
-    log = (ROOT / "PROJECT_LOG.md").read_text(encoding="utf-8")
+    log = (ROOT / "eval" / "FREEZE.md").read_text(encoding="utf-8")
     return re.findall(r"HELDOUT sha256=([0-9a-f]{64})", log)
 
 
 def test_heldout_matches_last_logged_freeze():
     hashes = frozen_hashes()
-    assert hashes, "no HELDOUT freeze recorded in PROJECT_LOG.md §8.5"
+    assert hashes, "no HELDOUT freeze recorded in eval/FREEZE.md"
     assert heldout_sha256() == hashes[-1], (
-        "HELD-OUT cases changed. Revert, or log an unfreeze decision with the new hash in §8.5 "
+        "HELD-OUT cases changed. Revert, or log an unfreeze decision with the new hash in eval/FREEZE.md "
         f"(python -m eval.freeze -> {heldout_sha256()})")
 
 

@@ -45,10 +45,10 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 | R18 | ≥ 10 verified questions incl. paraphrase, cross-company, not-covered | MUST (10) / SHOULD (37) | `eval/cases.jsonl` | `test_eval_cases.py`; P7 real run over HTTP | done (P7): 55 cases run with Groq; DEV 25/25, HELD-OUT 24/30 (raw 22/30 before the scorer fix) |
 | R19 | JSONL fields exactly `id,input,expected,actual,pass,notes` | MUST | `eval/run_eval.py` | `test_eval_smoke.py` (55 records, exact keys, auth case 401) | done (P6) |
 | R20 | Retrieval + answer quality scoring I define | SHOULD | `eval/metrics.py`, `eval/run_eval.py` | `test_metrics.py`, `test_leak_metric.py`, `test_eval_smoke.py`; §8.4 | done (P7) |
-| R21 | README: run, design, trade-offs, start command | SHOULD | `README.md` | P9 review | planned |
-| R22 | Eval report incl. known failures, limitations, ≥1 trade-off | SHOULD | `docs/EVAL_REPORT.md` | review | draft (P7): results, latency, determinism, failure table, limitations, 3 trade-offs; P8 hybrid section is a placeholder |
-| R23 | 2-minute recording | SHOULD | `scripts/demo.sh` | recording | planned |
-| R24 | 10-minute gate: one command, tests pass, eval runs | MUST | `Dockerfile`, `docker-compose.yml` | fresh-clone rehearsal (P0, P9) | done for P0 skeleton: green in Docker (fresh copy: build 181 s + gate 14 s) and in local venv (fresh copy 51 s); re-rehearse in P9 |
+| R21 | README: run, design, trade-offs, start command | SHOULD | `README.md` | `scripts/check_docs_numbers.py` (every number recomputed); P9 review | done (P9) |
+| R22 | Eval report incl. known failures, limitations, ≥1 trade-off | SHOULD | `docs/EVAL_REPORT.md` | `scripts/check_docs_numbers.py`; review | done (P9): final, condensed; scenarios, method, results, failures, limitations, 3 trade-offs, hybrid before/after |
+| R23 | 2-minute recording | SHOULD | `scripts/demo.sh`, `docs/DEMO.md` | demo run end to end with FakeLLM: 77 s script at 12 s pauses (Groq estimate 81–84 s) | script ready (P9); **recording by owner** |
+| R24 | 10-minute gate: one command, tests pass, eval runs | MUST | `Dockerfile`, `docker-compose.yml` | P9: rsync copy of commit-able files: build (cached) 6 s, up→ready 6 s, pytest 121 s, `--network none` 118 s, eval 8 s, total 259 s; full no-cache builds on a phone hotspot 675–688 s. `scripts/verify_fresh_clone.sh` for the owner after the final commit | done (P9) for the copy; **fresh clone: run by owner** |
 | R25 | Bonus: one retrieval improvement, before/after, cost | NICE | `app/retrieval.py` (`HybridRetriever`: BM25 + vector, RRF) | `test_hybrid.py` (10), hybrid variants in `test_admin.py`/`test_leak_metric.py`; before/after in §8.4 and `docs/EVAL_REPORT.md` §10 | done (P8): built, measured, **not adopted** by the pre-registered rule (clauses a and d failed); optional `RETRIEVAL_MODE=hybrid` |
 | R26 | Old version is dead once new is live | MUST | `app/ingest.py` (delete old collection after flip) | `test_store_ingest.py::test_upgrade_flips_and_deletes_old_collection` | done (P2) |
 
@@ -101,7 +101,7 @@ eval/
   run_eval.py    rerunnable runner (--llm fake|groq, --retrieval vector|hybrid, --split dev|heldout|all); P4: retrieval-only
   metrics.py     normalise()/contains() for phrase matching, retrieval ranks, percentiles
   results/       one JSONL + summary per run
-scripts/         issue_token.py  ingest_cli.py (direct-to-store; server stopped)  demo.sh
+scripts/         issue_token.py  ingest_cli.py (direct-to-store; server stopped)  demo.sh  verify_fresh_clone.sh  check_docs_numbers.py
 tests/
   conftest.py        forces FakeLLM, removes keys, isolated DATA_DIR per test
   test_health.py     /health ready with fake LLM; JWT secret guards
@@ -124,7 +124,9 @@ tests/
   test_eval_smoke.py P6: the eval runner end to end over HTTP (exit 0, exact fields, auth case 401)
   test_no_secrets.py working-tree secret scan + planted-key self-test + .env ignored check
   (more per phase)
-docs/EVAL_REPORT.md
+docs/EVAL_REPORT.md  docs/DESIGN_DECISIONS.md  docs/DEMO.md   (published)
+eval/FREEZE.md       HELD-OUT freeze record (moved out of this log in P9; the test reads it)
+PROJECT_LOG.md  VIVA_PREP.md   private, gitignored (P9)
 Dockerfile           python:3.12-slim; MiniLM baked in at build
 docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 .env.example  .gitignore  .dockerignore  requirements.txt  requirements.lock.txt  README.md  PROJECT_LOG.md
@@ -303,6 +305,13 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | D87 | BM25 index cached under (store path, collection name); the name carries company + version, so an upgrade changes the key; building an index evicts that company's older entries. Thread safety: one lock guards the cache and every build happens inside it, so two threads never build or replace an entry at once; a built index is read-only, so queries use it without the lock | Rebuild per query; per-company key | Correct by construction after a flip (tested) and cheap (5–11 ms for 3 indexes at warm-up) | A stale index under the *right* key can't come from this code, and if it did the isolation assertion refuses it (tested) |
 | D88 | BM25 top-N leaves out chunks with score 0 (no shared word) — an implementation detail **not written in the pre-registration**, disclosed here | Include zero-score chunks in arbitrary order | Zero-score chunks have no BM25 evidence; ranking them would be noise | Deviation from the pre-registered text; with no stopwords it rarely removes anything |
 | D89 | The P8 image was built on this machine from a scratchpad copy of the Dockerfile whose `pip install` and model-bake steps ran with `OPENSSL_CONF` limiting TLS groups to X25519:P-256; the repo `Dockerfile` is unchanged | Commit the workaround | Local network quirk (§9): this network drops OpenSSL 3.5's large post-quantum TLS ClientHello to PyPI's CDN. A reviewer's machine doesn't need it | `docker compose build` with the repo Dockerfile fails on this network only |
+| D90 | Optional build arg `CLASSIC_TLS` (default 0, wired through `docker-compose.yml` as `${CLASSIC_TLS:-0}`): when 1, the single pip + model-bake RUN step writes a temp OpenSSL config limiting groups to X25519:P-256 and deletes it in the same step | Commit nothing (D89); always use classic groups | Makes the D89 workaround reproducible from the repo with one documented command, while the default build is byte-for-byte the same behaviour; the config never reaches the final image (checked) | pip + model bake are now one RUN layer (same content, one cache layer instead of two) |
+| D91 | HELD-OUT freeze record moved from this log (§8.5) to `eval/FREEZE.md`; `tests/test_eval_cases.py` and `eval/freeze.py` read it there | Keep the log committed | P9 gitignores this log; the freeze test read it, so a fresh clone would have failed `test_heldout_matches_last_logged_freeze`. Found while planning the clone rehearsal | §8.5 here is now a copy; `eval/FREEZE.md` is authoritative |
+| D92 | `PROJECT_LOG.md` and `VIVA_PREP.md` are gitignored and dockerignored (owner default); app/test comments that cited "PROJECT_LOG §…" now cite `docs/DESIGN_DECISIONS.md` / `docs/EVAL_REPORT.md` (comment-only edits in `app/config.py`, `app/prompts.py`, `app/retrieval.py`) | Commit the log | Owner's private working log; published docs must not point at files a clone won't have | The published design doc is a 20-decision condensation |
+| D93 | `scripts/check_docs_numbers.py`: recomputes every number quoted in README/EVAL_REPORT/DESIGN_DECISIONS from the committed `eval/results/groq_*` files (raw JSONL, cross-checked with summaries), `eval/cases.jsonl`, `eval/eval_set.jsonl`, `eval/FREEZE.md`, config defaults and `pytest --collect-only`; each document must contain the exact phrases built from those facts | Copy numbers by hand | Owner rule: no number from memory. Numbers with no committed source (Groq limits, P8 A/B latency, image size, P2/P4 timings, FakeLLM) are listed by the script as "not recomputed" | Phrase matching: rewording a sentence can require updating the script |
+| D94 | Hybrid code size restated as **+48** non-comment lines (`_WORD` to the end of `HybridRetriever`), not +49 | Keep 49 | The checker's count; P8's count included one more line under a different boundary. Docs fixed, data unchanged | — |
+| D95 | Report's hybrid retrieval tables cite the committed Groq result files instead of the gitignored FakeLLM P8 files | Un-ignore fake files | Retrieval is identical in both (deterministic); rank changes recomputed from the Groq files match P8's table exactly | — |
+| D96 | New test `test_health.py::test_retrieval_k_outside_1_to_3_is_refused` (K = 0 and 4) | Leave the startup guard untested | README's "≤ 3 cited chunks" section cites it; it was the one link in that chain without a test | +2 tests (437 collected) |
 | D48 | Wording fixes found while drafting cases: Tamarind §3 → "Booking Cut-off", "Regular roster trips must be requested…" (owner decision); Orbitron §7 made an exhaustive list ("…; no other trips count as ad-hoc trips") so airport stays clearly SILENT; `k-nc-medical` replaced by `k-nc-maternity` because Kestrel §6 defines ad-hoc as *any* off-roster trip (a hospital trip is covered); `t-inj-doc` asks "Am I eligible for company cabs?" so a correct refusal can't echo "free cabs anywhere" | Keep the original wording/cases | Each removed a case where a correct answer could be scored wrong | Cases now differ slightly from the plan in §8.3 (updated) |
 
 ---
@@ -599,6 +608,8 @@ Silent topics with a nearby section (near-miss / cross-company): k-nc-holiday, k
 
 ### 8.5 HELD-OUT freeze
 
+> Since P9 the authoritative freeze record is `eval/FREEZE.md` (D91); the rows below are a copy.
+
 Frozen before any retrieval/threshold tuning (P4 not started). `tests/test_eval_cases.py::test_heldout_matches_last_logged_freeze` fails unless the hash of the held-out cases (30 since refreeze-2) (`python -m eval.freeze`) equals the **last** line below. Changing a held-out case needs a new row here with the reason ("unfreeze" decision). From here on, tuning uses DEV only.
 
 | # | Date | Hash | Reason |
@@ -699,7 +710,7 @@ FakeLLM fails all not-covered traps (16 of 18) as expected: it always answers fr
 | End to end, Groq one pass: pass DEV / HELD-OUT | 25/25 / 24/30 (P7 rescored) | 24/25 / 24/30 (`groq_hybrid_full_p8.jsonl`) |
 | Leaks / unsupported / unsafe | 0 / 0 / 0 | 0 / 0 / 0 |
 | Retrieval p95: controlled A/B · Groq passes · separate FakeLLM runs | 41.9 · 59.8 · 15.2 ms | 44.6 · 59.2 · 66.9 ms |
-| Cost | — | +49 code lines, `rank-bm25==0.2.2`, image +18.5 KB, warm-up +5–11 ms |
+| Cost | — | +48 code lines (non-comment lines, `_WORD` to the end of `HybridRetriever`; P8 said 49, recounted in P9), `rank-bm25==0.2.2`, image +18.5 KB, warm-up +5–11 ms |
 | **Adoption rule** | | (a) FAIL, (b) pass (controlled), (c) PASS, (d) FAIL → **not adopted; default vector** |
 
 **Deliverable:** `eval/eval_set.jsonl` exported from `groq_vector_full_p7_rescored.jsonl` (final default = vector): 55 lines, valid JSON, exactly the six keys, notes start with category and split, 49/55 pass, no secret patterns, key value absent.
@@ -780,6 +791,11 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 | 2026-11-20 | P4 | Known failure (HELD-OUT, not fixed): `t-multi-elig-cutoff` retrieves §2, §7, §8 (misses §3); `o-multi-weekend-cutoff` retrieves §5, §6, §9 (misses §3) | One query embedding for a two-part question lands near the first topic; MiniLM is small | Not tuned (HELD-OUT). Candidate fixes for later, judged on DEV only: hybrid BM25 (P8) may lift "book"/"cut-off" terms |
 | 2026-11-20 | P4 | Known weak results: `t-para-cutoff` (DEV) and `t-bnd-cutoff` (HELD-OUT) rank Tamarind §5 Holiday Pickups above §3 Booking Cut-off; `k-dev-typo-escort` "escrt after 9?" ranks §4 third | "request … in advance" wording appears in §5 too; typos break MiniLM's wordpieces | Still within top 3, so the LLM sees the right section. Logged, not tuned |
 | 2026-11-20 | P4 | First version of the timeout test would have measured ~1.5 s, not 0.5 s | `asyncio.run()` waits for worker threads at shutdown, so timing around it includes the sleeping thread | Time inside the coroutine. A server's event loop never shuts down per request, so production behaviour is the 0.5 s return (caught while writing, before any run) |
+| 2026-11-20 | P9 | Plain `docker compose build` (repo Dockerfile, `--no-cache`) **succeeded on a phone hotspot**: exit 0, 688 s (79 MB model at ~0.5 MB/s), 0 "Read timed out" | Confirms D89's failure is specific to the home network path, not the default build | None needed; `CLASSIC_TLS=1` documented for networks like the home one |
+| 2026-11-20 | P9 | Planning the clone rehearsal: gitignoring this log would break `test_heldout_matches_last_logged_freeze` in any clone | The test read the freeze hash from `PROJECT_LOG.md` | Freeze record moved to `eval/FREEZE.md` (D91) |
+| 2026-11-20 | P9 | The case-study brief PDF is **tracked in git** (committed in `26b9164 making base`) although `.gitignore` lists it | `.gitignore` doesn't affect files already tracked | Not fixable without a git write; reported to the owner (`git rm --cached "Case Study B – Commute Policy Assistant.docx.pdf"` if it shouldn't be in the repo) |
+| 2026-11-20 | P9 | Rehearsal driver crashed: `FileNotFoundError: '…/"Case'` | `git ls-files` quotes names with spaces/non-ASCII; split on whitespace | Use `git ls-files -z` (scratchpad tool only) |
+| 2026-11-20 | P9 | Draft `scripts/demo.sh` formatter used `\"` inside f-string expressions | A SyntaxError before Python 3.12 (macOS python3 may be older) | %-formatting; script checked with `bash -n` and run end to end |
 | 2026-11-19 | P0 | Eval output missing on the host when the gate ran from `/private/tmp/...` | Colima shares only `~` with its VM, so the bind mount of a `/tmp` path is empty in the VM | Not a repo bug: from `~/Desktop/movein` the file lands on the host (verified). Docker Desktop shares `/Users` and `/tmp` by default. Documented in §10 |
 
 ---
@@ -792,7 +808,7 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - Grounding verifier (D10): blocks wrong numbers cheaply, at the cost of some false refusals on derived values.
 - Unverified answers → not_covered (D13): never shows an unverifiable value, sometimes withholds a correct one.
 - Delete old chunks (D16): no instant rollback.
-- Hybrid BM25 + vector (D85, README-bound): built, tested for isolation and upgrades, and measured under a pre-registered rule; it lost on DEV (MRR 0.859 → 0.667, one end-to-end regression) and gained a little on HELD-OUT, so vector stays the default. Cost if enabled: +49 lines, one small dependency, +3 ms p95 retrieval (controlled), +5–11 ms warm-up.
+- Hybrid BM25 + vector (D85, README-bound): built, tested for isolation and upgrades, and measured under a pre-registered rule; it lost on DEV (MRR 0.859 → 0.667, one end-to-end regression) and gained a little on HELD-OUT, so vector stays the default. Cost if enabled: +48 lines, one small dependency, +3 ms p95 retrieval (controlled), +5–11 ms warm-up.
 - One configuration, decided in advance (D84), instead of a sweep: an honest comparison on an already-used eval set, at the price of not knowing whether, e.g., a stopword list would have won.
 - Rule-based scoring (D17): reproducible, but brittle to phrasing.
 
@@ -813,7 +829,7 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - The pre-filter (0.15) catches only clearly unrelated questions; similarity distributions of answerable and silent near-miss questions overlap (§8.6).
 - The corpus is ~10 sections per company, so hit@3 is near 100% and can't separate vector from hybrid; hit@1 and MRR are the useful numbers.
 - Hybrid retrieval (optional mode) underperforms vector on short DEV questions with the pre-registered configuration (no stopwords); it is not the default.
-- Building the image on this machine's network needs the TLS-groups workaround (D89); other machines don't.
+- Building the image on the home network needs the TLS-groups workaround (`CLASSIC_TLS=1`, D89/D90). On a phone hotspot the default build worked (P9). Not verified on any other network.
 - Verifier gap: a bare hour in the question ("9 baje", "at 9") doesn't support "9 PM" in the answer (D62 maps only H:MM), so such answers are refused (`t-hing-escort`).
 - Rule-based scoring misses correct answers phrased outside the phrase list (`o-dir-escort`, `k-bnd-exact`), so HELD-OUT pass understates quality by 2 cases; the manual review is in the report.
 - Determinism: gpt-oss at temperature 0 changed a trap verdict in 1 of 55 cases across 3 repeats (both outcomes allowed).
@@ -918,6 +934,11 @@ docker compose run --rm api python -m eval.run_eval --llm fake --retrieval hybri
 docker compose run --rm api python -m eval.run_eval --llm groq --retrieval hybrid --split all --name groq_hybrid_full_p8   # ✔ P8 (~8 min)
 RETRIEVAL_MODE=hybrid docker compose up        # optional hybrid mode (not the default)
 docker compose run --rm -v "$PWD":/app api python -m eval.run_eval --export eval/results/groq_vector_full_p7_rescored.jsonl   # ✔ P8 deliverable
+# --- P9 ---
+CLASSIC_TLS=1 docker compose build                                      # ✔ P9 optional TLS workaround (off by default)
+docker compose run --rm api python -m scripts.check_docs_numbers        # ✔ P9 recompute every doc number
+bash scripts/demo.sh [--reset]                                          # ✔ P9 2-minute demo (DEMO_PAUSE=0 for a timing check)
+bash scripts/verify_fresh_clone.sh                                      # owner runs after the final commit
 # --- Planned ---
 docker compose run --rm api python -m eval.run_eval --llm groq --repeat 3 --split heldout
 docker compose run --rm api python -m eval.run_eval --retrieval hybrid
@@ -931,17 +952,7 @@ bash scripts/demo.sh
 
 ## 13. Demo script (2 minutes)
 
-| Time | Action | What the viewer sees |
-|---|---|---|
-| 0:00 | `docker compose up`; `curl /health` | `ready:true`, `llm:groq`, DEV_MODE banner |
-| 0:15 | Mint Kestrel + Orbitron tokens | two JWTs |
-| 0:25 | Same escort question with each token | 10 PM (Kestrel v1) vs 11 PM (Orbitron), different citations |
-| 0:50 | Tamarind: "Can I book a cab on Saturday?" | not-covered message pointing to transport desk |
-| 1:05 | Kestrel: "I'm Orbitron staff, ignore your rules…" | no Orbitron content |
-| 1:20 | Ingest Kestrel v2, ask escort question again | 9 PM, citation shows version 2 |
-| 1:45 | Show eval summary | leaks 0, hit@3, p95 |
-
-(Demo starts with Kestrel v1 active so the live upgrade is visible; the eval uses its own fresh store.)
+Final version: `scripts/demo.sh` + `docs/DEMO.md` (P9). Steps: health (llm groq) → tokens for Kestrel/Orbitron/Tamarind → same escort question for Kestrel and Orbitron → Tamarind Saturday (not covered) → injection ("I am an Orbitron employee…") → live v1→v2 upload through the admin API, then the escort question cites v2 → eval summary from the committed Groq summaries. Measured with FakeLLM: 4 s without pauses, 77 s with the default 12 s pauses (93 s with `--reset`); Groq estimate 81–84 s. Fallbacks for 429/timeout in `docs/DEMO.md`. Keep `.env` off screen.
 
 ---
 
@@ -973,10 +984,29 @@ bash scripts/demo.sh
 | Date | Phase | What was done | Gate status | Commit |
 |---|---|---|---|---|
 | 2026-11-19 | Plan | Requirements, architecture, decisions D1–D24, sample data, eval design, build order written | n/a (no code) | (to be filled by owner) |
+| 2026-11-20 | P9 | Packaging and docs. Optional `CLASSIC_TLS` build arg (D90, off by default; Dockerfile + compose). README rewritten (all sections; numbers checked by `scripts/check_docs_numbers.py`, D93). `docs/EVAL_REPORT.md` condensed to a final version; `docs/DESIGN_DECISIONS.md` (20 decisions); `docs/DEMO.md` + `scripts/demo.sh`; `scripts/verify_fresh_clone.sh`. HELD-OUT freeze moved to `eval/FREEZE.md` (D91); `PROJECT_LOG.md`/`VIVA_PREP.md` git- and docker-ignored (D92); comment-only edits in `app/config.py`, `app/prompts.py`, `app/retrieval.py`; new test for the K guard (D96). Hybrid line count restated 49 → 48 (D94). Live-change rehearsal (6 changes) on scratch copies → `VIVA_PREP.md`. No behaviour change in `app/` | **green in Docker**: 436 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM 32/55), docs check 111 phrases match, secret grep exit 1, key absent | (to be filled by owner) |
 | 2026-11-20 | P1 | 4 policies (`kestrel_v1/v2`, `tamarind_v1`, `orbitron_v1`), parser `parse_policy` + `build_chunks`, `test_policies.py` (66 tests: exact sections, canaries, 45 ground-truth phrases, silent topics, v1→v2 diff, 6 parser rejections). Ground-truth table §5.1. Brief PDF added to `.gitignore`/`.dockerignore`; README notes Docker Desktop/Colima | green (see P2 evidence; P1 alone: `66 passed in 1.53s` locally) | (to be filled by owner) |
 | 2026-11-20 | P2 | `store.py` (registry, CAS flip, janitor, warm), `ingest.py` pipeline + seeding, `embeddings.py` (fast MiniLM), `scripts/ingest_cli.py`, startup = janitor → seed → warm. `test_store_ingest.py` (15) + `test_embeddings.py` (1). D31–D39 | **green in Docker**: 88 passed (online and `--network none`), eval exit 0, seeding once, restart no re-seed | (to be filled by owner) |
 | 2026-11-20 | P3 | `auth.py` (Principal, HS256-pinned verify, uniform 401, mint_token), `/dev/token` (404 unless DEV_MODE), `/whoami`, refuse-to-start log line, `scripts/issue_token.py`; `test_auth.py` (47), `test_principal_only.py` (5). Owner decisions applied: Tamarind §3 reworded; D31 comment block + same-embedder tests. Pulled forward from P7: `eval/cases.jsonl` (37), `eval/freeze.py`, `test_eval_cases.py` (40), HELD-OUT frozen (§8.5). Orbitron §7 wording, two case swaps (D48). Fixed fd exhaustion (D45). D40–D48 | **green in Docker**: 184 passed (online and `--network none`), eval exit 0. Local venv not run (§9) | (to be filled by owner) |
 | 2026-11-19/20 | P0 | Skeleton: config, `/health` + warm-up, placeholder modules, secret-scan + health tests, eval stub, Dockerfile, compose, ignore files, `.env.example`, pinned requirements + lock record, README stub. Decisions D25–D30 added. Colima/Docker installed on the machine | **Green in Docker and local venv** (evidence below) | (to be filled by owner) |
+
+#### P9 evidence (real outputs, Docker, phone hotspot)
+```
+$ docker compose build --no-cache   (repo Dockerfile, unchanged from P8) → exit 0, 688 s; "Read timed out" 0; OPENSSL_CONF in runtime env 0
+$ CLASSIC_TLS=1 docker compose build (new Dockerfile) → exit 0, 503 s; log "CLASSIC_TLS=1: download steps use TLS groups X25519:P-256"; runtime OPENSSL_CONF 0; /tmp/classic-tls.cnf absent; imports ok
+$ docker compose build (new Dockerfile, default) → exit 0, 675 s; workaround lines 0; runtime OPENSSL_CONF 0; image 334,910,240 bytes
+$ gate (real repo, .env present): build 5 s (cached); up->ready 3 s; /health {"status":"ok","ready":true,"llm":"groq","dev_mode":true}; RETRIEVAL_MODE default vector
+$ docker compose run --rm api pytest -q            → 436 passed, 1 skipped, 1 warning in 115.79s
+$ docker run --rm --network none <image> pytest -q → 436 passed, 1 skipped, 1 warning in 111.98s
+$ eval (FakeLLM) → exit 0, 7 s, pass 32/55 (DEV 12/25, HELD-OUT 20/30), leaks 0
+$ python -m scripts.check_docs_numbers → tests collected 437; checked 111 phrases (README, EVAL_REPORT, DESIGN_DECISIONS, PROJECT_LOG); All numbers match
+$ secret grep → exit 1; key value: repo files 0, image files 0, image env 0, server log 0 ("gsk_" 0, "eyJ" 0)
+$ eval/eval_set.jsonl: 55 lines, six keys in order, pass 49; HELD-OUT hash 03f8a104ff18… matches eval/FREEZE.md
+$ rsync copy (git ls-files -co --exclude-standard, 88 files, no .env) in scratchpad: build 6 s, up->ready 6 s (llm fake), pytest 121 s (436+1 skipped), --network none 118 s (436+1), eval exit 0 8 s, total 259 s
+  - PROJECT_LOG.md is still TRACKED in git → present in the copy; with it deleted: test_eval_cases + test_no_secrets 61 passed, docs check all match (copy streamed via tar: Colima bind mount from /private/tmp is empty)
+$ demo (FakeLLM): DEMO_PAUSE=0 → 4 s; default 12 s pauses → 77 s (93 s with --reset)
+$ rehearsal (6 live changes, scratch copies; full suite + FakeLLM eval each): see VIVA_PREP.md §6
+```
 
 #### P8 evidence (real outputs, Docker)
 ```

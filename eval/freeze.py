@@ -2,9 +2,9 @@
 
     python -m eval.freeze        # prints the current hash
 
-The frozen hash lives in PROJECT_LOG.md §8.5 as a line containing `HELDOUT sha256=<hex>`.
+The frozen hash lives in eval/FREEZE.md as a line containing `HELDOUT sha256=<hex>`.
 tests/test_eval_cases.py fails unless the current hash equals the LAST such line. Changing a held-out
-case therefore requires a logged "unfreeze" decision: a new §8.5 row with the new hash and the reason.
+case therefore requires a logged "unfreeze" decision: a new row in eval/FREEZE.md with the new hash and the reason.
 """
 
 import hashlib

@@ -3,7 +3,10 @@
 # WARNING: never run with DEV_MODE=true in production.
 services:
   api:
-    build: .
+    build:
+      context: .
+      args:
+        CLASSIC_TLS: ${CLASSIC_TLS:-0}   # optional build workaround, off by default (README, Troubleshooting)
     image: commute-policy-assistant:dev
     ports:
       - "8000:8000"

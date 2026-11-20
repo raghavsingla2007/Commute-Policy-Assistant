@@ -4,7 +4,7 @@ The prompt is one layer of defence, not the defence: the company comes from the 
 sees the caller's collection, the output is schema-checked, citations are validated, and numbers are
 verified against the cited text. The prompt's job is to make the model a careful reader.
 
-Every prompt version is logged in PROJECT_LOG.md §8.7 with its DEV score. PROMPT_VERSION is the live one.
+v1 is the only prompt used in measured runs; the reasoning variant was an A/B on DEV and was rejected (docs/EVAL_REPORT.md).
 """
 
 from app.llm import Prompt

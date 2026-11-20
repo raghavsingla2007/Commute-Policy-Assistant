@@ -46,7 +46,7 @@ CANARIES = {
     "orbitron": ["ext. 7720", "Nimbus Rides"],
 }
 
-# Ground truth: (file, section_id, exact phrase). Mirrors PROJECT_LOG.md §5.1.
+# Ground truth: (file, section_id, exact phrase). Each phrase is checked against the policy files below.
 GROUND_TRUTH = [
     # Night escort
     ("kestrel_v1.md", "4", "Women employees are provided a security escort on drops departing after 10:00 PM"),

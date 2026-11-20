@@ -11,8 +11,8 @@ Flow of `retrieve()`:
      to answer (IsolationViolation -> "unavailable") rather than risk showing another company's rule.
 
 `passes_prefilter()` is the cheap not-covered pre-filter: if even the best chunk is below
-NOT_COVERED_MIN_SIM, skip the LLM. It is set LOW on purpose (chosen from DEV data, see PROJECT_LOG
-§8.6): it only removes clearly unrelated questions. The LLM's verdict is the real gate (D9).
+NOT_COVERED_MIN_SIM, skip the LLM. It is set LOW on purpose (chosen from DEV data, see
+docs/DESIGN_DECISIONS.md D52): it only removes clearly unrelated questions. The LLM's verdict is the real gate (D9).
 """
 
 import asyncio
@@ -110,7 +110,7 @@ class VectorRetriever:
 # so a chunk ranked well by both wins, and the raw scores (cosine vs BM25, different scales) never mix.
 # Why RRF and not reranking or query rewriting: RRF costs ~ms and 0 LLM calls. A cross-encoder reranker
 # is another model and +100-300 ms; query rewriting needs the second LLM call (~1 s of the 3 s budget).
-# Config is pre-registered (PROJECT_LOG §8.8): BM25Okapi defaults, N = 5, k = 60, equal weights.
+# Config is pre-registered (docs/EVAL_REPORT.md §6): BM25Okapi defaults, N = 5, k = 60, equal weights.
 #
 # Isolation: an index is built only from ONE collection's own chunks, and is cached under
 # (store path, collection name), where the name carries company and version (pol_kestrel_v2). After an
