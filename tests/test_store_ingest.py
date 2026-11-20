@@ -7,7 +7,7 @@ import pytest
 
 
 from app import ingest as ingest_mod
-from app.embeddings import MiniLMEmbedder
+from app.embeddings import shared_embedder
 from app.ingest import IngestFailed, PolicyParseError, ingest_policy, parse_policy, seed_if_empty
 from app.store import Store, VersionConflict, collection_name
 
@@ -20,12 +20,14 @@ def text(name: str) -> str:
 
 @pytest.fixture(scope="session")
 def embedder():
-    return MiniLMEmbedder()  # real MiniLM, baked into the Docker image
+    return shared_embedder()  # real MiniLM, baked into the Docker image
 
 
 @pytest.fixture
 def store(tmp_path, embedder):
-    return Store(tmp_path / "data", embedder)
+    s = Store(tmp_path / "data", embedder)
+    yield s
+    s.close()
 
 
 def kestrel_chunks(store: Store) -> list[dict]:

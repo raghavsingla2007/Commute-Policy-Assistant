@@ -218,6 +218,10 @@ class Store:
             log.warning("janitor: %d stale staging rows failed, orphans deleted: %s", stale, orphans)
         return {"stale_staging": stale, "orphans_deleted": orphans}
 
+    def close(self) -> None:
+        """Release Chroma's files. Called at app shutdown (and by tests that open many stores)."""
+        self.chroma.close()
+
     def warm(self) -> None:
         """Touch every active collection once so the first real query is not cold."""
         with self._connect() as conn:

@@ -57,6 +57,8 @@ class Settings:
             raise ValueError(f"JWT_SECRET must be at least {MIN_JWT_SECRET_LENGTH} characters")
         if not self.dev_mode and self.jwt_secret == DEV_DEFAULT_JWT_SECRET:
             raise ValueError("JWT_SECRET is the dev default; set a real secret when DEV_MODE is off")
+        if not 1 <= self.jwt_ttl_s <= 24 * 3600:
+            raise ValueError("JWT_TTL_S must be between 1 and 86400 seconds")
         if not 1 <= self.retrieval_k <= 3:
             raise ValueError("RETRIEVAL_K must be between 1 and 3 (max 3 cited chunks per answer)")
         if self.retrieval_mode not in {"vector", "hybrid"}:
@@ -76,7 +78,7 @@ def load_settings() -> Settings:
         jwt_secret=env("JWT_SECRET", DEV_DEFAULT_JWT_SECRET),
         jwt_issuer=env("JWT_ISSUER", "commute-policy-mock-issuer"),
         jwt_audience=env("JWT_AUDIENCE", "commute-policy-api"),
-        jwt_ttl_s=int(env("JWT_TTL_S", "3600")),
+        jwt_ttl_s=int(env("JWT_TTL_S", "900")),   # 15 min default token lifetime
         dev_mode=_bool("DEV_MODE", False),
         data_dir=Path(env("DATA_DIR", "./var")),
         policies_dir=Path(env("POLICIES_DIR", str(PROJECT_ROOT / "data" / "policies"))),

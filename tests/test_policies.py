@@ -19,7 +19,7 @@ EXPECTED_SECTIONS = {
         ("10", "Changes and Cancellations"),
     ],
     "tamarind_v1.md": [
-        ("1", "Scope and Contacts"), ("2", "Eligibility"), ("3", "Weekday Booking Cut-off"),
+        ("1", "Scope and Contacts"), ("2", "Eligibility"), ("3", "Booking Cut-off"),
         ("4", "Night Shift Safety"), ("5", "Holiday Pickups"), ("6", "Ad-hoc Trips"),
         ("7", "Airport Trips"), ("8", "Guest Travel"), ("9", "Help Channels and Feedback"),
         ("10", "No-show Policy"), ("11", "Cancellations"),
@@ -65,7 +65,7 @@ GROUND_TRUTH = [
     ("orbitron_v1.md", "2", "rotational shifts or night shifts are eligible"),
     # Booking cut-off
     ("kestrel_v2.md", "3", "at least 4 hours before the scheduled pickup time"),
-    ("tamarind_v1.md", "3", "at or before 6:00 PM on the previous working day"),
+    ("tamarind_v1.md", "3", "Regular roster trips must be requested at or before 6:00 PM on the previous working day"),
     ("orbitron_v1.md", "3", "at least 2 hours before the scheduled pickup time"),
     # Ad-hoc cost cap and approver
     ("kestrel_v1.md", "6", "₹800 per trip"),
@@ -75,6 +75,7 @@ GROUND_TRUTH = [
     ("tamarind_v1.md", "6", "approval from the staff member's department head"),
     ("orbitron_v1.md", "7", "₹2,500 per employee per calendar month"),
     ("orbitron_v1.md", "7", "approved by the employee's reporting manager"),
+    ("orbitron_v1.md", "7", "no other trips count as ad-hoc trips"),
     # Weekend / holiday
     ("kestrel_v2.md", "5", "Saturdays are available only with prior approval from the employee's reporting manager"),
     ("kestrel_v2.md", "5", "No company transport is provided on Sundays"),
@@ -107,10 +108,11 @@ GROUND_TRUTH = [
 
 # Silent topics: no section may mention these words (the eval's not_covered cases depend on it).
 SILENT = [
-    ("tamarind_v1.md", ["weekend", "saturday", "sunday"]),
+    ("tamarind_v1.md", ["weekend", "saturday", "sunday", "monday", "friday", "weekday"]),
     ("orbitron_v1.md", ["airport", "cancellation fee", "cancelled"]),
-    ("kestrel_v1.md", ["holiday", "pet", "medical", "hospital"]),
-    ("kestrel_v2.md", ["holiday", "pet", "medical", "hospital"]),
+    ("kestrel_v1.md", ["holiday", "pet", "medical", "hospital", "pregnan", "maternity"]),
+    ("kestrel_v2.md", ["holiday", "pet", "dog", "medical", "hospital", "pregnan", "maternity", "reimburse"]),
+    ("orbitron_v1.md", ["parking"]),
     ("tamarind_v1.md", ["address change", "change their pickup", "pickup address"]),
 ]
 

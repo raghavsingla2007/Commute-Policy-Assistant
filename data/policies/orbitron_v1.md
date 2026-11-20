@@ -32,7 +32,7 @@ Pickups and drops on company holidays are available if requested at least 24 hou
 
 ## 7 Ad-hoc Trips
 
-Ad-hoc trips include trips to client sites and late-evening trips outside the roster. Ad-hoc trips must be approved by the employee's reporting manager. Ad-hoc trip spending is capped at ₹2,500 per employee per calendar month.
+Ad-hoc trips are trips to client sites and late-evening trips outside the roster; no other trips count as ad-hoc trips. Ad-hoc trips must be approved by the employee's reporting manager. Ad-hoc trip spending is capped at ₹2,500 per employee per calendar month.
 
 ## 8 Guest Travel
 

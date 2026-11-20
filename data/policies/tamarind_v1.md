@@ -14,9 +14,9 @@ This policy covers company-arranged commute for all Tamarind Health staff. Cabs 
 
 Staff whose home is more than 5 km from the office by road are eligible for company transport. Staff whose home is 5 km or less from the office are not eligible for company transport.
 
-## 3 Weekday Booking Cut-off
+## 3 Booking Cut-off
 
-Trips from Monday to Friday must be requested at or before 6:00 PM on the previous working day. Requests made after 6:00 PM on the previous working day are not accepted.
+Regular roster trips must be requested at or before 6:00 PM on the previous working day. Requests made after 6:00 PM on the previous working day are not accepted.
 
 ## 4 Night Shift Safety
 
