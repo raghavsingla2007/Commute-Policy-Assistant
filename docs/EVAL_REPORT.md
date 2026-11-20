@@ -1,6 +1,6 @@
 # Evaluation report — Commute Policy Assistant
 
-Draft at the end of P7 (2026-11-20). Every number here comes from a result file in `eval/results/` named next to it. Final version after P8 (hybrid retrieval) and P9.
+Draft at the end of P7, P8 section added (2026-11-20). Every number here comes from a result file in `eval/results/` named next to it. Final version after P8 (hybrid retrieval) and P9.
 
 ## 1. Purpose and what is measured
 
@@ -182,8 +182,79 @@ Temperature 0, but gpt-oss is not fully deterministic. Across 3 repeats of 55 ca
 
 ## 10. Hybrid retrieval (P8) — before/after
 
-> **PLACEHOLDER — filled in P8.** Vector baseline for comparison: HELD-OUT hit@1 16/19, hit@3 17/19, MRR 0.868; multi_section 0/2.
+**Pre-registered before any code or run** (`PROJECT_LOG.md` §8.8, 2026-11-20 15:19 UTC): one configuration only — `rank_bm25.BM25Okapi` defaults (k1 1.5, b 0.75, epsilon 0.25); tokenizer = lowercase, split on non-alphanumerics, keep digits, no stemming, no stopwords; candidates = vector top-5 and BM25 top-5 from the caller's active collection; Reciprocal Rank Fusion with k = 60, equal weights; return top 3. The not-covered pre-filter keeps the top-1 **vector** similarity (0.15). Configurations tried: **1**. Implementation detail not written in the pre-registration: BM25 candidates with a score of 0 (no word in common with the question) are left out of the BM25 top 5; with no stopword list almost every chunk shares a word, so this rarely removes anything.
+
+### 10.1 Retrieval only (FakeLLM, no LLM cost; `fake_vector_all_p8.jsonl` vs `fake_hybrid_all_p8.jsonl`)
+
+| Split | answerable | vector hit@1 / hit@3 / MRR | hybrid hit@1 / hit@3 / MRR |
+|---|---|---|---|
+| DEV | 13 | 10/13 · 13/13 · 0.859 | 6/13 · 12/13 · 0.667 |
+| HELD-OUT | 19 | 16/19 · 17/19 · 0.868 | 17/19 · 17/19 · 0.895 |
+| All | 32 | 26/32 · 30/32 · **0.865** | 23/32 · 29/32 · **0.802** |
+
+Every case whose expected-section rank changed (rank 1 = top):
+
+| id | split | vector rank | hybrid rank | vector top 3 | hybrid top 3 |
+|---|---|---|---|---|---|
+| k-dir-cutoff | DEV | 1 | 2 | §3, §7, §1 | §9, §3, §4 |
+| t-para-cutoff | DEV | 3 | **not retrieved** | §5, §9, §3 | §9, §5, §10 |
+| k-dev-terse-sat | DEV | 1 | 3 | §5, §1, §9 | §4, §9, §5 |
+| k-dev-typo-escort | DEV | 3 | 2 | §9, §2, §4 | §9, §4, §10 |
+| o-dev-ans-cutoff | DEV | 1 | 3 | §3, §9, §6 | §9, §2, §3 |
+| k-hing-weekend | DEV | 1 | 2 | §5, §9, §10 | §9, §5, §4 |
+| t-bnd-cutoff | HELD-OUT | 2 | 1 | §5, §3, §9 | §3, §5, §10 |
+
+Per category (hit@1): terse 2/3 → 0/3, hinglish 2/2 → 1/2, direct 8/8 → 7/8, boundary 4/5 → 5/5; multi_section stays 0/2 (hit@3 0/2 in both). The No-show section (§9) rises to the top for many short questions: with no stopword list, BM25 rewards common words ("a", "my", "the", "cab", "in") that section happens to repeat. That is the pre-registered configuration's weakness; a stopword list would be a second configuration and was **not** tried (the rule requires asking first).
+
+### 10.2 End to end, real Groq, one pass each (`groq_vector_full_p7_rescored.jsonl` vs `groq_hybrid_full_p8.jsonl`)
+
+| | vector (P7) DEV | hybrid DEV | vector HELD-OUT | hybrid HELD-OUT |
+|---|---|---|---|---|
+| Pass | 25/25 | **24/25** | 24/30 | 24/30 |
+| Status accuracy | 25/25 | 24/25 | 26/30 | 26/30 |
+| False refusals | 0/13 | 1/13 | 4/19 | 4/19 |
+| Not-covered accuracy | 11/11 | 11/11 | 7/7 | 7/7 |
+| Citation correct | 14/14 | 13/13 | 16/16 | 16/16 |
+| Leaks / unsupported claims / unsafe outcomes | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+
+The only changed case: **`t-para-cutoff`** (DEV) passed with vector and failed with hybrid — §3 Booking Cut-off dropped out of the top 3 (§9, §5, §10), so the model correctly said it couldn't find the answer (a safe refusal). Per category, only paraphrase changed (7/7 → 6/7). HELD-OUT failures are the same six cases in both modes; multi-section is still 0/2. Hybrid run: 2026-11-20 15:34–15:41 UTC, 52 LLM calls, 0 × 429.
+
+### 10.3 Latency and complexity cost
+
+| Cost | Measured |
+|---|---|
+| Retrieval p95, interleaved A/B in one process (55 questions × 5, order alternated) | vector 41.9 ms → hybrid 44.6 ms: **+2.7 ms** |
+| Retrieval p95, two separate FakeLLM `--repeat 3` runs | vector 15.2 ms → hybrid 66.9 ms: +51.7 ms (VM noise and run order dominate; see profile) |
+| Retrieval p95, the two Groq single passes | 59.8 ms → 59.2 ms |
+| BM25 scoring per query (profile) | 0.1 ms p50; the rest is the same embedding + Chroma query vector mode does (hybrid asks Chroma for 5 instead of 3) |
+| Warm-up: building 3 BM25 indexes | 5–11 ms (total startup varied 724–1,355 ms across runs in both modes) |
+| End-to-end p95 (Groq single pass) | 1,317 ms → 1,446 ms (one pass each; Groq variance) |
+| Code | +49 lines of BM25/fusion code (40–60 target), plus comments, the `Hits` return type and the warm-up hook: `app/` diff +110 / −15 |
+| Dependency / image | `rank-bm25==0.2.2` (pure Python; needs numpy, already present): image 334,910,513 → 334,929,026 bytes (+18.5 KB) |
+| New failure modes, each tested | stale index after an upgrade (`test_after_upgrade_hybrid_uses_only_v2`, `test_stale_index_under_old_key_is_never_looked_up`); a wrong index under the right key (`test_stale_index_under_new_key_is_caught_by_isolation`, `test_hybrid_foreign_index_*`); cold index on first request (`test_startup_builds_indexes_so_first_request_does_not`); upgrade under load (`test_readers_during_the_flip_hybrid_mode`); cross-company sweep in hybrid (`test_no_foreign_chunk_in_hybrid_for_any_company_and_question`) |
+
+### 10.4 Decision: the pre-registered rule, clause by clause
+
+| Clause | Result | Verdict |
+|---|---|---|
+| (a) MRR not lower, and no hit@3 regression on any case | MRR 0.865 → 0.802; hit@3 regression on `t-para-cutoff` (3 → not retrieved) | **FAIL** |
+| (b) retrieval p95 grows by under 50 ms | +2.7 ms controlled A/B; −0.6 ms across the Groq passes; +51.7 ms across two separate noisy runs | pass on the controlled measurement; mixed across measurements (moot: (a) and (d) fail) |
+| (c) zero new test failures, zero leaks | 434 passed, 0 failed; leaks 0 in every hybrid run and test | **PASS** |
+| (d) no previously passing end-to-end case fails | `t-para-cutoff` passed with vector, fails with hybrid | **FAIL** |
+
+**Hybrid is not adopted. The default stays `RETRIEVAL_MODE=vector`**; hybrid remains an optional mode (`RETRIEVAL_MODE=hybrid`), fully tested for isolation and upgrades. It did not fix the problem it was expected to help with (multi-section 0/2 → 0/2).
+
+### 10.5 Remaining failures with causes (final default = vector)
+
+Unchanged from §5: multi-section retrieval misses (2), model over-caution on "is my trip approved?" (1), verifier false-reject on a bare hour (1), correct answers outside the phrase lists (2). UNSAFE outcomes: 0.
+
+### 10.6 What I did not try, and why
+
+- **Cross-encoder reranking:** another model to ship and run, about +100–300 ms per question on CPU; not needed to stay safe, and the corpus is too small to show much gain.
+- **Query rewriting / decomposition** (the obvious fix for multi-section questions): needs the second LLM call (~+1 s of the 3 s budget) and doubles token use against the 8,000 TPM limit.
+- **Chunking changes:** chunks are already one section each, the unit citations need.
+- **A second BM25 configuration** (stopwords, different N or k): not tried; the pre-registration says any second configuration needs the owner's approval first.
 
 ## 11. Deliverable
 
-`eval/eval_set.jsonl` (the brief's evaluation set: `id, input, expected, actual, pass, notes`, real `actual`/`pass`) is generated at the end of P8 from the final run with `python -m eval.run_eval --export eval/results/<final run>.jsonl`. `eval/cases.jsonl` stays the frozen input set.
+`eval/eval_set.jsonl` is the brief's evaluation set: 55 lines, exactly `id, input, expected, actual, pass, notes`, with real `actual`/`pass` from the final default configuration's Groq run (vector, P7 single pass rescored: 49/55). Generated with `python -m eval.run_eval --export eval/results/groq_vector_full_p7_rescored.jsonl`. `eval/cases.jsonl` stays the frozen input set.

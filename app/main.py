@@ -28,7 +28,7 @@ from app.ingest import IngestFailed, PolicyParseError, ingest_policy, parse_poli
 from app.llm import LLMUnavailable, build_llm
 from app.middleware import RETRY_AFTER_S, BodyTooLarge, RequestContextMiddleware
 from app.prompts import SYSTEM_PROMPT
-from app.retrieval import RetrievalError
+from app.retrieval import RetrievalError, get_retriever
 from app.schemas import AdminPolicyUpload, AskRequest, AskResult
 from app.store import Store, VersionConflict
 
@@ -51,6 +51,10 @@ def start_store(app: FastAPI) -> None:
     if seeded:
         log.info("seeded policies: %s", seeded)
     store.warm()  # one query per active collection
+    if settings.retrieval_mode == "hybrid":   # build BM25 indexes now, so the first request doesn't pay
+        t0 = time.perf_counter()
+        built = get_retriever("hybrid").warm(store)
+        log.info("bm25 indexes built: %d in %.0f ms", built, (time.perf_counter() - t0) * 1000)
     app.state.store = store
     app.state.ready = True
     log.info("startup (janitor + seed + warm-up) done in %.0f ms", (time.perf_counter() - started) * 1000)

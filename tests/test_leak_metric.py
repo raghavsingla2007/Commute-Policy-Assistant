@@ -14,7 +14,7 @@ from app import ask as ask_mod
 from app import retrieval
 from app.config import load_settings
 from app.main import app
-from app.retrieval import _to_chunk, get_retriever
+from app.retrieval import Hits, _to_chunk, get_retriever
 from eval.run_eval import ask_http, check_case, find_leaks, section_texts, summarise
 
 PROBE = {"id": "leak-probe", "input": {"company": "kestrel", "question": "Who operates the transport, and what is the transport desk helpline for things not covered here?"},
@@ -28,7 +28,7 @@ class LeakyRetriever:
     name = "vector"
 
     def search(self, store, active, question, k):
-        return [_to_chunk(h, 1.0 - h["distance"]) for h in store.query("pol_orbitron_v1", question, k)]
+        return Hits.of([_to_chunk(h, 1.0 - h["distance"]) for h in store.query("pol_orbitron_v1", question, k)])
 
 
 @pytest.fixture
@@ -84,3 +84,38 @@ def test_isolation_assertion_on_gives_503_and_no_foreign_text(client, monkeypatc
     for foreign in ("Nimbus", "7720", "Orbitron", "orbitron"):
         assert foreign not in body
     assert find_leaks("kestrel", actual) == []        # nothing foreign reached the user or the citations
+
+
+
+# --- hybrid mode: the realistic hybrid failure is a wrong BM25 index under the caller's cache key ---------
+@pytest.fixture
+def hybrid_client(tmp_path, monkeypatch):
+    from app.retrieval import HybridRetriever
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("RETRIEVAL_MODE", "hybrid")
+    h = HybridRetriever()
+    monkeypatch.setitem(retrieval.RETRIEVERS, "hybrid", h)
+    with TestClient(app) as c:
+        outcomes = {}
+        app.state.result_sink = outcomes.__setitem__
+        c.outcomes = outcomes
+        store = app.state.store
+        key = (str(store.db_path), "pol_kestrel_v1")
+        h._cache[key] = h.index(store, store.active_policy("orbitron"))        # Orbitron's index, Kestrel's key
+        yield c
+        app.state.result_sink = None
+
+
+def test_hybrid_foreign_index_with_defences_bypassed_is_reported(hybrid_client, monkeypatch):
+    monkeypatch.setattr(retrieval, "assert_isolation", lambda *a, **k: None)
+    monkeypatch.setattr(ask_mod, "foreign_companies", lambda *a, **k: [])
+    actual = ask_http(hybrid_client, app, PROBE, hybrid_client.outcomes)
+    scores, _ = check_case(PROBE, actual, section_texts())
+    assert "retrieved:orbitron" in scores["leaks"]
+
+
+def test_hybrid_foreign_index_with_isolation_on_gives_503(hybrid_client):
+    actual = ask_http(hybrid_client, app, PROBE, hybrid_client.outcomes)
+    assert actual["http_status"] == 503 and actual["reason"] == "IsolationViolation"
+    assert find_leaks("kestrel", actual) == []

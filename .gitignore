@@ -20,6 +20,7 @@ chroma/
 eval/results/*
 !eval/results/.gitkeep
 !eval/results/groq_*.jsonl
+!eval/results/groq_*.summary.json
 
 # OS / editor
 .DS_Store

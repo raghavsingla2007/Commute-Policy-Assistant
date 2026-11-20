@@ -49,7 +49,7 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 | R22 | Eval report incl. known failures, limitations, ≥1 trade-off | SHOULD | `docs/EVAL_REPORT.md` | review | draft (P7): results, latency, determinism, failure table, limitations, 3 trade-offs; P8 hybrid section is a placeholder |
 | R23 | 2-minute recording | SHOULD | `scripts/demo.sh` | recording | planned |
 | R24 | 10-minute gate: one command, tests pass, eval runs | MUST | `Dockerfile`, `docker-compose.yml` | fresh-clone rehearsal (P0, P9) | done for P0 skeleton: green in Docker (fresh copy: build 181 s + gate 14 s) and in local venv (fresh copy 51 s); re-rehearse in P9 |
-| R25 | Bonus: one retrieval improvement, before/after, cost | NICE | `app/retrieval.py` (hybrid) | eval vector vs hybrid | planned; P4 `Retriever` interface + `RETRIEVERS` registry ready, vector baseline in §8.4 |
+| R25 | Bonus: one retrieval improvement, before/after, cost | NICE | `app/retrieval.py` (`HybridRetriever`: BM25 + vector, RRF) | `test_hybrid.py` (10), hybrid variants in `test_admin.py`/`test_leak_metric.py`; before/after in §8.4 and `docs/EVAL_REPORT.md` §10 | done (P8): built, measured, **not adopted** by the pre-registered rule (clauses a and d failed); optional `RETRIEVAL_MODE=hybrid` |
 | R26 | Old version is dead once new is live | MUST | `app/ingest.py` (delete old collection after flip) | `test_store_ingest.py::test_upgrade_flips_and_deletes_old_collection` | done (P2) |
 
 **Self-imposed additions** (from plan review):
@@ -85,7 +85,7 @@ app/
   auth.py        Principal, verify_token (HS256 pinned), require_principal dependency, mint_token (mock issuer)
   schemas.py     Pydantic: LLMOutput (strict, unknown keys ignored), Citation, AskResult (AskRequest in P6)
   ask.py         the /ask pipeline orchestrator — the one file to read to understand a request
-  retrieval.py   Retriever interface (vector now, hybrid P8), 0.5 s timeout, isolation assertion, pre-filter
+  retrieval.py   Retriever interface: vector (default) and hybrid BM25 + RRF (optional); 0.5 s timeout, isolation assertion, pre-filter
   llm.py         LLM protocol, GroqLLM (httpx), FakeLLM (+ test modes), CallBudget, parse_llm_output
   prompts.py     system prompt + excerpt builder (S1..S3 labels, tag escaping)
   grounding.py   citation validation, number/time/₹ verifier, foreign-company check, citation rendering
@@ -120,6 +120,7 @@ tests/
   test_groq_live.py  P5: one real Groq call (marked `groq`, skipped by default)
   test_api.py        P6: /ask over HTTP: shapes, 15 bad inputs, 413, every 503 cause, request ids, 8 parallel requests
   test_admin.py      P6: admin roles, own-company rule, 409/422/500/413, status, live upgrade with concurrent readers
+  test_hybrid.py     P8: pre-registered config, RRF by hand, cache invalidation on upgrade, stale-index safety, warm-up, hybrid isolation sweep
   test_eval_smoke.py P6: the eval runner end to end over HTTP (exit 0, exact fields, auth case 401)
   test_no_secrets.py working-tree secret scan + planted-key self-test + .env ignored check
   (more per phase)
@@ -139,6 +140,7 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | chromadb | 1.5.9 | PyPI (2026-05-05) | latest; requires-python ≥ 3.9 |
 | pyjwt | 2.15.1 | PyPI (2026-09-28) | latest |
 | httpx | 0.28.1 | PyPI | latest stable (1.0 only dev releases) |
+| rank-bm25 | 0.2.2 | PyPI JSON (released 2022-02-16; checked 2026-11-20) | latest; pure Python; requires numpy (already present). Wheel sha256 7bd4a955…e8ae verified |
 | pytest | 9.2.0 | PyPI (2026-10-27) | latest |
 | Chroma default embedder | `chromadb.utils.embedding_functions.DefaultEmbeddingFunction` → ONNX all-MiniLM-L6-v2 | docs.trychroma.com + installed source | cache: `~/.cache/chroma/onnx_models/all-MiniLM-L6-v2` (read from `ONNXMiniLM_L6_V2.DOWNLOAD_PATH`) |
 | Chroma client | `chromadb.PersistentClient(path, settings=Settings(anonymized_telemetry=False))` | installed 1.5.9 signature + `Settings` fields | |
@@ -295,6 +297,12 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | D81 | "Confidently wrong" = answered with a must_include group missing or a must_not_include phrase present; every such case is also reviewed by hand | Trust the metric alone | The metric can't tell a wrong answer from a correctly phrased answer outside the phrase list (2 such cases) | Manual step |
 | D82 | Deliverable `eval/eval_set.jsonl` is produced by `--export <result file>` (exactly the six fields, real `actual`/`pass`) at the end of P8; `eval/cases.jsonl` stays the frozen inputs | Hand-assembled file | One command, reproducible, from a real run | — |
 | D83 | Test-only "leaky" retriever lives only in `tests/test_leak_metric.py` (registered via monkeypatch); `RETRIEVAL_MODE` still accepts only vector/hybrid | Config flag | Can't be switched on in production (tested) | — |
+| D84 | **P8 pre-registration (2026-11-20T15:19+00:00, written before any hybrid code or run)**: exactly one hybrid configuration, one adoption rule (§8.8) | Parameter sweeps | Every extra try on an already-used eval set is tuning; one config + a rule decided in advance keeps the comparison honest | If the one config loses, there is no second try without the owner's approval |
+| D85 | **Adoption rule applied (P8): hybrid NOT adopted; default stays `RETRIEVAL_MODE=vector`.** (a) FAIL: MRR 0.865 → 0.802 and hit@3 regression on `t-para-cutoff`; (b) +2.7 ms controlled A/B (also +51.7 ms across two noisy separate runs; moot); (c) PASS: 434 passed, 0 leaks; (d) FAIL: `t-para-cutoff` passed with vector, fails with hybrid | Adopt anyway (HELD-OUT MRR rose 0.868 → 0.895) | The rule was fixed in advance and is applied literally; HELD-OUT gains don't override DEV regressions under it | Hybrid stays an optional, tested mode |
+| D86 | A retriever returns `Hits(chunks, top_similarity)`; the pre-filter always uses the top-1 VECTOR cosine similarity | Use the fused list's first chunk | Pre-registered (BM25 scores aren't calibrated); after fusion the vector #1 may not be in the top 3 | Test doubles return `Hits.of(chunks)` |
+| D87 | BM25 index cached under (store path, collection name); the name carries company + version, so an upgrade changes the key; building an index evicts that company's older entries. Thread safety: one lock guards the cache and every build happens inside it, so two threads never build or replace an entry at once; a built index is read-only, so queries use it without the lock | Rebuild per query; per-company key | Correct by construction after a flip (tested) and cheap (5–11 ms for 3 indexes at warm-up) | A stale index under the *right* key can't come from this code, and if it did the isolation assertion refuses it (tested) |
+| D88 | BM25 top-N leaves out chunks with score 0 (no shared word) — an implementation detail **not written in the pre-registration**, disclosed here | Include zero-score chunks in arbitrary order | Zero-score chunks have no BM25 evidence; ranking them would be noise | Deviation from the pre-registered text; with no stopwords it rarely removes anything |
+| D89 | The P8 image was built on this machine from a scratchpad copy of the Dockerfile whose `pip install` and model-bake steps ran with `OPENSSL_CONF` limiting TLS groups to X25519:P-256; the repo `Dockerfile` is unchanged | Commit the workaround | Local network quirk (§9): this network drops OpenSSL 3.5's large post-quantum TLS ClientHello to PyPI's CDN. A reviewer's machine doesn't need it | `docker compose build` with the repo Dockerfile fails on this network only |
 | D48 | Wording fixes found while drafting cases: Tamarind §3 → "Booking Cut-off", "Regular roster trips must be requested…" (owner decision); Orbitron §7 made an exhaustive list ("…; no other trips count as ad-hoc trips") so airport stays clearly SILENT; `k-nc-medical` replaced by `k-nc-maternity` because Kestrel §6 defines ad-hoc as *any* off-roster trip (a hospital trip is covered); `t-inj-doc` asks "Am I eligible for company cabs?" so a correct refusal can't echo "free cabs anywhere" | Keep the original wording/cases | Each removed a case where a correct answer could be scored wrong | Cases now differ slightly from the plan in §8.3 (updated) |
 
 ---
@@ -635,6 +643,24 @@ Rules: iterate on DEV only, at most 3 iterations; HELD-OUT run zero times in P5.
 - DEV is now saturated (25/25), so it can't discriminate further; the HELD-OUT measurement in P7 is the honest number.
 - `llm_calls` max = 1 in every run; 2 of 25 DEV cases were answered `not_covered` by the pre-filter with 0 LLM calls.
 
+### 8.8 P8 pre-registration (written 2026-11-20T15:19+00:00, before any hybrid code or run)
+
+**The one configuration (no sweeps):**
+- `rank_bm25.BM25Okapi` with default parameters (k1=1.5, b=0.75, epsilon=0.25).
+- Tokenizer: lowercase, split on non-alphanumerics, keep digits, no stemming, no stopword list.
+- Candidates: vector top-N and BM25 top-N, **N = 5**, from the caller's active collection only.
+- Fusion: Reciprocal Rank Fusion, score(d) = Σ 1 / (k + rank), **k = 60**, equal weights; return the top **3**.
+- The not-covered pre-filter keeps using the **top-1 vector cosine similarity**; threshold stays **0.15**. BM25 scores are not calibrated, so they never decide "not covered".
+- If any second configuration is wanted, stop and ask the owner first; log every configuration attempted.
+
+**Adoption rule (decided now, applied literally afterwards).** Hybrid becomes the default only if, across the 55 cases:
+- (a) MRR is not lower, and hit@3 has no regression on any case;
+- (b) retrieval p95 grows by under 50 ms;
+- (c) zero new test failures and zero leaks;
+- (d) no previously passing end-to-end case fails (baseline: P7 vector single pass, rescored, `groq_vector_full_p7_rescored.jsonl`).
+
+Otherwise hybrid stays an optional mode (`RETRIEVAL_MODE=hybrid`) and the default stays vector. A neutral or negative result is reported as is, with its cost.
+
 ### 8.4 Results
 
 **Retrieval only (P4, vector, k=3, threshold 0.15).** Real runs in Docker. hit@k and MRR are over cases whose expected status is exactly `answered`; multi-section cases count as a hit only when *all* expected sections are within k (D54).
@@ -661,6 +687,22 @@ Latency includes the query embedding. It varies between runs on this machine (p9
 | fake × vector, HTTP (P7 gate) | DEV / HELD-OUT | 25 / 30 | 12 / 20 | 16/25 / 23/30 | 0 / 0 | 2/11 / 0/7 | 10/13 / 23/25 — 16/19 / 29/30 | 10/14 / 19/22 | 0 | 0 | 0 | 0 | 1 | 22 / 61 (all) |
 
 FakeLLM fails all not-covered traps (16 of 18) as expected: it always answers from S1.
+
+**P8 hybrid before/after** (pre-registered config, §8.8; one configuration tried). Full tables in `docs/EVAL_REPORT.md` §10.
+
+| | vector | hybrid |
+|---|---|---|
+| Retrieval, all 32 answerable: hit@1 / hit@3 / MRR | 26/32 · 30/32 · 0.865 | 23/32 · 29/32 · 0.802 |
+| — DEV (13) | 10/13 · 13/13 · 0.859 | 6/13 · 12/13 · 0.667 |
+| — HELD-OUT (19) | 16/19 · 17/19 · 0.868 | 17/19 · 17/19 · 0.895 |
+| Rank changes | — | worse: k-dir-cutoff 1→2, t-para-cutoff 3→none, k-dev-terse-sat 1→3, o-dev-ans-cutoff 1→3, k-hing-weekend 1→2; better: k-dev-typo-escort 3→2, t-bnd-cutoff 2→1 |
+| End to end, Groq one pass: pass DEV / HELD-OUT | 25/25 / 24/30 (P7 rescored) | 24/25 / 24/30 (`groq_hybrid_full_p8.jsonl`) |
+| Leaks / unsupported / unsafe | 0 / 0 / 0 | 0 / 0 / 0 |
+| Retrieval p95: controlled A/B · Groq passes · separate FakeLLM runs | 41.9 · 59.8 · 15.2 ms | 44.6 · 59.2 · 66.9 ms |
+| Cost | — | +49 code lines, `rank-bm25==0.2.2`, image +18.5 KB, warm-up +5–11 ms |
+| **Adoption rule** | | (a) FAIL, (b) pass (controlled), (c) PASS, (d) FAIL → **not adopted; default vector** |
+
+**Deliverable:** `eval/eval_set.jsonl` exported from `groq_vector_full_p7_rescored.jsonl` (final default = vector): 55 lines, valid JSON, exactly the six keys, notes start with category and split, 49/55 pass, no secret patterns, key value absent.
 
 **P7 real-LLM measurement** (`eval/results/groq_vector_full_p7.jsonl` raw, `groq_vector_full_p7_rescored.jsonl` after the scorer fix; latency `groq_vector_full_p7_latency.jsonl`). Run 2026-11-20 14:38–15:10 UTC (20:08–20:40 IST), home network → Colima VM → Groq; quota before: 999/1000 requests left, 8,000 TPM. n is small: one case = 3–4 points.
 
@@ -716,12 +758,15 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 | 2026-11-19 | P2 | Ingesting one 10-section policy took ~2 s; full suite 84 s. Measured: one 7-word query embedding = **490 ms** median in Docker, 442 ms locally | Chroma's MiniLM tokenizer pads every text to 256 tokens (`enable_padding(length=256)`), so each query runs a full 256-token pass. On Mac it also defaults to the CoreML provider | `app/embeddings.py` pads each text to its own length: **26 ms** median in Docker, 5 ms locally, identical vectors (8.6e-8). Suite now 13 s locally, 33 s in Docker (D31) |
 | 2026-11-19 | P2 | First fix attempt (pad to longest in batch) crashed: "inhomogeneous shape" | Chroma tokenizes each text separately, so different lengths can't be stacked | Embed one text per call |
 | 2026-11-19 | P2 | `DefaultEmbeddingFunction` has no `tokenizer` attribute | It wraps `ONNXMiniLM_L6_V2` | Use `ONNXMiniLM_L6_V2` directly |
+| 2026-11-20 | P8 | Pre-registered one hybrid config + adoption rule (§8.8, D84) before any code. Built `HybridRetriever` (BM25Okapi defaults, N 5, RRF k 60), `Hits` return type, index cache keyed by collection with eviction and a lock, warm-up build; `rank-bm25==0.2.2`. Tests: `test_hybrid.py` (10) + hybrid live-upgrade and leak-mutation tests. Measured: retrieval before/after, Groq one pass hybrid, latency A/B, cost. Rule applied: (a) FAIL, (b) pass, (c) PASS, (d) FAIL → **not adopted**, default vector. Deliverable `eval/eval_set.jsonl` exported from the P7 vector pass. Report §10 filled. `.gitignore` keeps `groq_*.summary.json`. Image built with the local TLS workaround (D89). D84–D89 | **green in Docker** (image built via D89): 434 passed + 1 skipped (online and `--network none`), FakeLLM eval exit 0, default mode vector | (to be filled by owner) |
 | 2026-11-20 | P7 | Step A: leak metric completed (D78) + `test_leak_metric.py` (leaky test-only retriever). Step B: quota 999/1000. Step C: Groq single pass, all 55, DEV 25/25, HELD-OUT 22/30 raw → 24/30 after the scorer bug fix (D79, rescored without LLM calls). Step D: `--repeat 3`, p95 1264 ms, 0 × 429, 1 timeout, 2 status flips (1 allowed, 1 infra), 0 key-fact flips. Step E: failure table (UNSAFE 0). Step G: `docs/EVAL_REPORT.md` draft. Runner: `--name/--quota/--rescore/--export/--max-429-rate`, per-split and per-category summaries, `quantiles(n=20)[18]`. D78–D83. No change to prompt, threshold, K, retrieval or verifier | **green in Docker**: 421 passed + 1 skipped (online and `--network none`), FakeLLM eval exit 0 | (to be filled by owner) |
 | 2026-11-20 | P6 | P5 patches: verifier rule 2 (D67), `finish_reason=length` → 503 (D68). HTTP: `POST /ask` (AskRequest, deadline, 503 mapping, Retry-After), `app/middleware.py` (request id, 413, catch-all), 401/403/409/413/422/500/503 bodies; `POST /admin/policies` + `GET /admin/policies/status`; retrieval NotFound retry (D74); eval over HTTP with admin-API upgrade and auth case. Tests: `test_api.py` (41), `test_admin.py` (13), `test_eval_smoke.py`, + verifier/truncation/retry tests. DEV real runs: 25/25 at 300 and at 500 tokens; kept 300. D67–D77 | **green in Docker**: 415 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM over HTTP); compose without `.env` → `llm:"fake"`, with `.env` → `llm:"groq"` | (to be filled by owner) |
 | 2026-11-20 | P5 | `app/llm.py` (GroqLLM over httpx, FakeLLM + 6 test modes, CallBudget, strict parse), `app/prompts.py` (v1 + reasoning variant), `app/grounding.py` (citations, verifier, foreign-company check, rendering, label strip), `app/ask.py` core `answer()`, `app/schemas.py`, `app/messages.py`, `app/textnorm.py`; eval `--llm fake|groq` through `answer()`; README LLM section. Groq checked live: Llama 404 → gpt-oss-20b. DEV: v1 25/25 twice, reasoning A/B rejected. D57–D66 | **green in Docker**: 348 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM); live Groq test passed when enabled | (to be filled by owner) |
 | 2026-11-20 | P4 | Step 1: +18 eval cases (DEV +11, HELD-OUT +7: multi-section, boundary, leak-bait, Hinglish) → 55; one logged refreeze (§8.5). Step 2: `eval/metrics.py` normaliser + `test_metrics.py` (37). Step 3: `app/retrieval.py` (Retriever interface, 0.5 s timeout, isolation assertion, pre-filter), `Store.query`, `test_retrieval.py` (14), retrieval-only eval runner (hit@1/hit@3/MRR, similarity, margin, latency). Threshold 0.15 from DEV (§8.6). HELD-OUT measured once (§8.4). D49–D56 | **green in Docker**: 253 passed (online and `--network none`), eval exit 0. Local venv not run | (to be filled by owner) |
 | 2026-11-20 | P3 | Docker pytest: 5 failed + 6 errors, `OSError: [Errno 24] Too many open files` | Every `TestClient(app)` start created a new ONNX session and a Chroma client and never closed them; the new auth tests started the app ~30 times | `shared_embedder()` (one model per process), `Store.close()` at shutdown, one module-scoped app in `test_auth.py`, store fixture closes (D45). Then 184 passed in 25 s (faster than P2's 33 s) |
 | 2026-11-20 | P3 | Local `.venv/bin/python` and `cat` hung for minutes | The project is on the iCloud-synced Desktop; macOS had offloaded 181 `.venv` files and 7 small repo files (`find -flags +dataless`), so each read waited for a download | Not a repo bug. Reading the 7 repo files restored them; P3 was verified in Docker only. Local venv not re-run (would need the offloaded files re-downloaded or the folder moved out of iCloud, which is a machine change I haven't made) |
+| 2026-11-20 | P8 | `docker compose build` failed: pip "Read timed out" to pypi.org; restarting Colima (owner-approved) did not help | Inside the VM, curl reached PyPI over IPv4, but Python in the container timed out in the TLS handshake. Cause found: the image's OpenSSL 3.5.7 sends a large post-quantum (ML-KEM) key share by default, and this network path drops that large ClientHello to PyPI's CDN (Fastly); with groups X25519:P-256 the same request succeeded in 0.41 s. Groq was unaffected | Image built once from a scratchpad Dockerfile with `OPENSSL_CONF` only for the pip and model-bake steps (D89); repo Dockerfile unchanged; runtime has no `OPENSSL_CONF` (checked). While blocked, tests and measurements ran in the existing image with the source mounted and the sha256-verified `rank_bm25` wheel installed offline |
+| 2026-11-20 | P8 | Hybrid lost on DEV: MRR 0.859 → 0.667; `t-para-cutoff` §3 dropped out of the top 3 → end-to-end refusal | With no stopword list, BM25 rewards common words; the No-show section (§9) repeats them and rises for short questions | Not fixed: a second configuration needs the owner's approval (D84). Logged as the reason hybrid isn't adopted (D85) |
 | 2026-11-20 | P7 | **Scorer bug** on HELD-OUT `o-dir-noshow`, `k-para-noshow`: correct answers "30‑day"/"7‑day suspension" failed must_include "30-day"/"7-day" | The model writes U+2011 non-breaking hyphens; the scorer's normaliser didn't fold them, so the same spelling didn't match (the log, D53, says equivalent spellings compare equal) | `eval/metrics.py` folds typographic variants (D79) + test; rescored stored answers: HELD-OUT 22/30 → 24/30, DEV 25/25 unchanged. HELD-OUT scoring no longer pristine |
 | 2026-11-20 | P7 | **Eval gap**: the leak metric counted only canaries, not foreign retrieved/cited chunks as §8.2 defines | P5/P6 runner implemented part of the definition | `retrieved_companies` added to the internal result; `find_leaks` checks all three (D78); `test_leak_metric.py` proves it reports leaks when defences are bypassed |
 | 2026-11-20 | P7 | Leak-metric test first failed: no canary in the answer | The probe question retrieved Orbitron §4 first, not §1 (where the canaries are) | Probe question reworded to match §1 ("Who operates the transport…"). Test-only |
@@ -747,6 +792,8 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - Grounding verifier (D10): blocks wrong numbers cheaply, at the cost of some false refusals on derived values.
 - Unverified answers → not_covered (D13): never shows an unverifiable value, sometimes withholds a correct one.
 - Delete old chunks (D16): no instant rollback.
+- Hybrid BM25 + vector (D85, README-bound): built, tested for isolation and upgrades, and measured under a pre-registered rule; it lost on DEV (MRR 0.859 → 0.667, one end-to-end regression) and gained a little on HELD-OUT, so vector stays the default. Cost if enabled: +49 lines, one small dependency, +3 ms p95 retrieval (controlled), +5–11 ms warm-up.
+- One configuration, decided in advance (D84), instead of a sweep: an honest comparison on an already-used eval set, at the price of not knowing whether, e.g., a stopword list would have won.
 - Rule-based scoring (D17): reproducible, but brittle to phrasing.
 
 **Limitations (known in advance)**
@@ -765,6 +812,8 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - Retrieval timeout returns at 0.5 s, but the worker thread keeps running until its search ends (threads can't be cancelled in Python). Under sustained slowness these threads could pile up in the default pool.
 - The pre-filter (0.15) catches only clearly unrelated questions; similarity distributions of answerable and silent near-miss questions overlap (§8.6).
 - The corpus is ~10 sections per company, so hit@3 is near 100% and can't separate vector from hybrid; hit@1 and MRR are the useful numbers.
+- Hybrid retrieval (optional mode) underperforms vector on short DEV questions with the pre-registered configuration (no stopwords); it is not the default.
+- Building the image on this machine's network needs the TLS-groups workaround (D89); other machines don't.
 - Verifier gap: a bare hour in the question ("9 baje", "at 9") doesn't support "9 PM" in the answer (D62 maps only H:MM), so such answers are refused (`t-hing-escort`).
 - Rule-based scoring misses correct answers phrased outside the phrase list (`o-dir-escort`, `k-bnd-exact`), so HELD-OUT pass understates quality by 2 cases; the manual review is in the report.
 - Determinism: gpt-oss at temperature 0 changed a trap verdict in 1 of 55 cases across 3 repeats (both outcomes allowed).
@@ -865,6 +914,10 @@ docker compose run --rm api python -m eval.run_eval --llm groq --split all --nam
 docker compose run --rm api python -m eval.run_eval --llm groq --split all --repeat 3 --name groq_vector_full_p7_latency --quiet   # ✔ P7 latency (~23 min)
 docker compose run --rm api python -m eval.run_eval --rescore eval/results/groq_vector_full_p7.jsonl --name groq_vector_full_p7_rescored   # ✔ P7
 docker compose run --rm api python -m eval.run_eval --export eval/results/<final>.jsonl   # P8: writes eval/eval_set.jsonl
+docker compose run --rm api python -m eval.run_eval --llm fake --retrieval hybrid --repeat 3 --name fake_hybrid_all_p8 --quiet   # ✔ P8 retrieval-only
+docker compose run --rm api python -m eval.run_eval --llm groq --retrieval hybrid --split all --name groq_hybrid_full_p8   # ✔ P8 (~8 min)
+RETRIEVAL_MODE=hybrid docker compose up        # optional hybrid mode (not the default)
+docker compose run --rm -v "$PWD":/app api python -m eval.run_eval --export eval/results/groq_vector_full_p7_rescored.jsonl   # ✔ P8 deliverable
 # --- Planned ---
 docker compose run --rm api python -m eval.run_eval --llm groq --repeat 3 --split heldout
 docker compose run --rm api python -m eval.run_eval --retrieval hybrid
@@ -908,7 +961,7 @@ bash scripts/demo.sh
 | P6 | MUST | `/ask` HTTP + deadline + error mapping, middleware, admin API + status, live-upgrade readers, eval over HTTP | `test_api.py`, `test_admin.py`, `test_eval_smoke.py` green ✔; curl transcripts ✔ |
 | P7a | MUST | ≥ 10 cases + metrics + runner, FakeLLM | eval runs in container; leaks = 0 ✔ |
 | P7b | SHOULD | all 55 cases, HELD-OUT frozen, Groq quality + latency runs, failure analysis, report draft | §8.4 filled with real numbers ✔ |
-| P8 | NICE | hybrid BM25 + RRF; before/after | hybrid rows in §8.4 |
+| P8 | NICE | hybrid BM25 + RRF (pre-registered); before/after; adoption rule; deliverable export | hybrid rows in §8.4 ✔; decision D85 (not adopted) ✔ |
 | P9 | SHOULD | README, EVAL_REPORT, demo script, fresh-clone gate rehearsal (timed) | gate < 10 min on a clean clone with no key |
 
 **Cut first if time runs out (in order):** P8 hybrid → verifier-metric polish (keep the verifier) → Groq `--repeat 3` down to 1 → demo polish. MUST phases are never cut. The gate is re-run at the end of every phase.
@@ -924,6 +977,27 @@ bash scripts/demo.sh
 | 2026-11-20 | P2 | `store.py` (registry, CAS flip, janitor, warm), `ingest.py` pipeline + seeding, `embeddings.py` (fast MiniLM), `scripts/ingest_cli.py`, startup = janitor → seed → warm. `test_store_ingest.py` (15) + `test_embeddings.py` (1). D31–D39 | **green in Docker**: 88 passed (online and `--network none`), eval exit 0, seeding once, restart no re-seed | (to be filled by owner) |
 | 2026-11-20 | P3 | `auth.py` (Principal, HS256-pinned verify, uniform 401, mint_token), `/dev/token` (404 unless DEV_MODE), `/whoami`, refuse-to-start log line, `scripts/issue_token.py`; `test_auth.py` (47), `test_principal_only.py` (5). Owner decisions applied: Tamarind §3 reworded; D31 comment block + same-embedder tests. Pulled forward from P7: `eval/cases.jsonl` (37), `eval/freeze.py`, `test_eval_cases.py` (40), HELD-OUT frozen (§8.5). Orbitron §7 wording, two case swaps (D48). Fixed fd exhaustion (D45). D40–D48 | **green in Docker**: 184 passed (online and `--network none`), eval exit 0. Local venv not run (§9) | (to be filled by owner) |
 | 2026-11-19/20 | P0 | Skeleton: config, `/health` + warm-up, placeholder modules, secret-scan + health tests, eval stub, Dockerfile, compose, ignore files, `.env.example`, pinned requirements + lock record, README stub. Decisions D25–D30 added. Colima/Docker installed on the machine | **Green in Docker and local venv** (evidence below) | (to be filled by owner) |
+
+#### P8 evidence (real outputs, Docker)
+```
+pre-registration written 2026-11-20T15:19Z (before code)
+$ docker compose build → pip "Read timed out" to pypi.org (x2); colima stop/start (owner-approved) → still failing
+$ in container: OpenSSL 3.5.7; urlopen pypi groups=default → handshake timed out; groups=X25519:P-256 → 200 in 0.41 s
+$ docker build -f <scratchpad>/Dockerfile.localnet -t commute-policy-assistant:dev . → Successfully built (2:52); rank_bm25 ok; OPENSSL_CONF in env: 0; /tmp/o.cnf: absent
+  image size 334,910,513 → 334,929,026 bytes
+$ retrieval-only (FakeLLM, --repeat 3): vector retrieve p95 15.2 ms; hybrid 66.9 ms; hit@1/hit@3/MRR all: 26/32 30/32 0.865 → 23/32 29/32 0.802
+$ interleaved A/B (275 searches each): vector p50 13.1 p95 41.9; hybrid p50 13.9 p95 44.6; p95 delta +2.7 ms
+$ profile: bm25 warm (3 indexes) 6.0 ms; bm25 get_scores p50 0.1 ms
+$ --quota → remaining-requests 807 (15:34 UTC)
+$ eval --llm groq --retrieval hybrid --split all --name groq_hybrid_full_p8 → exit=0, 15:34:09–15:41:45 UTC, 52 LLM calls, 0 × 429
+  dev 24/25 (t-para-cutoff: not_covered, retrieved §9 §5 §10), heldout 24/30, leaks 0, unsupported 0, retrieve p95 59.2 ms, wall p95 1446 ms
+$ warm-up logs: hybrid "bm25 indexes built: 3 in 5 ms" / "in 11 ms"; startup 724–1355 ms across 4 starts (both modes)
+$ gate: up->ready 4 s; /health {"status":"ok","ready":true,"llm":"groq","dev_mode":true}; RETRIEVAL_MODE default = vector; gsk_ in logs 0
+$ docker compose run --rm api pytest -q            → 434 passed, 1 skipped, 1 warning in 74.75s
+$ docker run --rm --network none <image> pytest -q → 434 passed, 1 skipped, 1 warning in 75.27s
+$ eval (FakeLLM, default vector) → exit=0, pass 32/55
+$ --export → "exported 55 records … to eval/eval_set.jsonl"; check: 55 lines, valid JSON, keys (id,input,expected,actual,pass,notes), notes category+split, pass 49/55, secret patterns 0, key 0
+```
 
 #### P7 evidence (real outputs, Docker)
 ```

@@ -12,7 +12,7 @@ from app.auth import Principal
 from app.config import KNOWN_COMPANIES, load_settings
 from app.embeddings import shared_embedder
 from app.ingest import ingest_policy, seed_if_empty
-from app.retrieval import (IsolationViolation, RetrievalError, RetrievalTimeout, RetrievedChunk,
+from app.retrieval import (Hits, IsolationViolation, RetrievalError, RetrievalTimeout, RetrievedChunk,
                            get_retriever, passes_prefilter, retrieve)
 from app.store import Store
 from eval.freeze import load_cases
@@ -73,10 +73,10 @@ def test_company_without_active_policy(tmp_path, settings):
         s.close()
 
 
-def test_hybrid_mode_is_not_built_yet():
-    assert get_retriever("vector").name == "vector"
-    with pytest.raises(NotImplementedError, match="P8"):
-        get_retriever("hybrid")
+def test_modes_registry():
+    assert get_retriever("vector").name == "vector" and get_retriever("hybrid").name == "hybrid"
+    with pytest.raises(NotImplementedError, match="unknown retrieval mode"):
+        get_retriever("bm25-only")
 
 
 # --- isolation: every company asks every other company's questions and canary bait ----------
@@ -114,7 +114,7 @@ class ForcedRetriever:
         time.sleep(self.sleep_s)
         if self.error:
             raise self.error
-        return self.chunks
+        return Hits.of(self.chunks)
 
 
 def fake_chunk(company: str, version: int) -> RetrievedChunk:

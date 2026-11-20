@@ -155,7 +155,7 @@ def test_retrieval_timeout_propagates(store, monkeypatch):
         def search(self, *a):
             import time
             time.sleep(1.0)
-            return []
+            return retrieval.Hits.of([])
 
     monkeypatch.setitem(retrieval.RETRIEVERS, "vector", Slow())
     with pytest.raises(RetrievalTimeout):

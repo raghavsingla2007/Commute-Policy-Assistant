@@ -2,7 +2,7 @@
 
 Flow of `retrieve()`:
   1. The company comes from the verified Principal only (never from the request).
-  2. A Retriever (vector now; hybrid in P8, same interface) runs in a worker thread, bounded by
+  2. A Retriever (vector, or hybrid BM25 + vector; same interface) runs in a worker thread, bounded by
      RETRIEVAL_TIMEOUT_S with asyncio.wait_for. On timeout we raise RetrievalTimeout (the API maps it
      to "try again"). The worker thread can't be killed; it finishes in the background and its result
      is discarded.
@@ -17,11 +17,14 @@ NOT_COVERED_MIN_SIM, skip the LLM. It is set LOW on purpose (chosen from DEV dat
 
 import asyncio
 import logging
+import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from chromadb.errors import NotFoundError
+from rank_bm25 import BM25Okapi
 
 from app.auth import Principal
 from app.config import Settings
@@ -52,7 +55,20 @@ class RetrievedChunk:
     version: int
     section_id: str
     section_title: str
-    similarity: float          # cosine similarity, 1 = identical direction
+    similarity: float | None   # vector cosine similarity (1 = same direction); None if only BM25 found it
+
+
+@dataclass(frozen=True)
+class Hits:
+    """What a retriever returns: its top chunks, plus the TOP-1 VECTOR cosine similarity, which the
+    not-covered pre-filter uses in every mode (BM25 scores are not calibrated, D84)."""
+
+    chunks: list[RetrievedChunk]
+    top_similarity: float | None
+
+    @classmethod
+    def of(cls, chunks: list[RetrievedChunk]) -> "Hits":
+        return cls(chunks, chunks[0].similarity if chunks else None)
 
 
 @dataclass(frozen=True)
@@ -61,10 +77,7 @@ class RetrievalResult:
     version: int | None        # None: the company has no active policy
     chunks: list[RetrievedChunk]
     retrieve_ms: float
-
-    @property
-    def best_similarity(self) -> float | None:
-        return self.chunks[0].similarity if self.chunks else None
+    best_similarity: float | None = None   # top-1 vector cosine similarity (pre-filter input)
 
 
 class Retriever(Protocol):
@@ -72,7 +85,7 @@ class Retriever(Protocol):
 
     name: str
 
-    def search(self, store: Store, active: ActivePolicy, question: str, k: int) -> list[RetrievedChunk]: ...
+    def search(self, store: Store, active: ActivePolicy, question: str, k: int) -> Hits: ...
 
 
 def _to_chunk(hit: dict, similarity: float) -> RetrievedChunk:
@@ -84,17 +97,93 @@ def _to_chunk(hit: dict, similarity: float) -> RetrievedChunk:
 class VectorRetriever:
     name = "vector"
 
-    def search(self, store: Store, active: ActivePolicy, question: str, k: int) -> list[RetrievedChunk]:
+    def search(self, store: Store, active: ActivePolicy, question: str, k: int) -> Hits:
         hits = store.query(active.collection, question, k)
-        return [_to_chunk(h, 1.0 - h["distance"]) for h in hits]    # cosine space: distance = 1 - cos
+        return Hits.of([_to_chunk(h, 1.0 - h["distance"]) for h in hits])   # cosine space: distance = 1 - cos
 
 
-RETRIEVERS: dict[str, Retriever] = {"vector": VectorRetriever()}   # P8 adds "hybrid"
+# ---------------------------------------------------------------- hybrid: BM25 + vector, fused by RRF (P8)
+#
+# What it does: two rankers each pick their top 5 chunks from the caller's ACTIVE collection. The vector
+# ranker matches meaning ("ride along" ~ "escort"); BM25 matches exact words ("cut-off", "Sunday", "₹").
+# Reciprocal Rank Fusion scores each chunk as the sum of 1 / (60 + rank) over the lists it appears in,
+# so a chunk ranked well by both wins, and the raw scores (cosine vs BM25, different scales) never mix.
+# Why RRF and not reranking or query rewriting: RRF costs ~ms and 0 LLM calls. A cross-encoder reranker
+# is another model and +100-300 ms; query rewriting needs the second LLM call (~1 s of the 3 s budget).
+# Config is pre-registered (PROJECT_LOG §8.8): BM25Okapi defaults, N = 5, k = 60, equal weights.
+#
+# Isolation: an index is built only from ONE collection's own chunks, and is cached under
+# (store path, collection name), where the name carries company and version (pol_kestrel_v2). After an
+# upgrade the active collection name changes, so the old index is never looked up again (and is evicted).
+# Thread safety: one lock guards the cache and every build happens inside it, so two threads never build
+# or replace an entry at the same time; a built index is read-only, so queries use it without a lock.
+
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def tokenize(text: str) -> list[str]:
+    return _WORD.findall(text.lower())        # lowercase, split on non-alphanumerics, keep digits
+
+
+@dataclass(frozen=True)
+class _Index:
+    ids: list[str]
+    texts: list[str]
+    metadatas: list[dict]
+    bm25: BM25Okapi
+
+
+class HybridRetriever:
+    name = "hybrid"
+    N, RRF_K = 5, 60
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, str], _Index] = {}
+        self._lock = threading.Lock()
+
+    def index(self, store: Store, active: ActivePolicy) -> _Index:
+        key = (str(store.db_path), active.collection)
+        with self._lock:
+            if key not in self._cache:
+                got = store.get_collection(active.collection).get(include=["documents", "metadatas"])
+                stale = [k for k in self._cache if k[0] == key[0] and k[1].startswith(f"pol_{active.company_id}_v")]
+                for k in stale:                                       # retired versions of this company
+                    del self._cache[k]
+                self._cache[key] = _Index(got["ids"], got["documents"], got["metadatas"],
+                                          BM25Okapi([tokenize(d) for d in got["documents"]]))
+            return self._cache[key]
+
+    def warm(self, store: Store) -> int:
+        """Build every active collection's index at startup, so no request pays for it."""
+        active = [store.active_policy(r["company_id"]) for r in store.rows() if r["status"] == "active"]
+        for a in active:
+            self.index(store, a)
+        return len(active)
+
+    def search(self, store: Store, active: ActivePolicy, question: str, k: int) -> Hits:
+        vector = [_to_chunk(h, 1.0 - h["distance"]) for h in store.query(active.collection, question, self.N)]
+        idx = self.index(store, active)
+        scores = idx.bm25.get_scores(tokenize(question))
+        bm25_top = [i for i in sorted(range(len(scores)), key=lambda i: -scores[i])[: self.N] if scores[i] > 0]
+        fused: dict[str, float] = {}
+        for rank, c in enumerate(vector, start=1):
+            fused[c.chunk_id] = fused.get(c.chunk_id, 0.0) + 1 / (self.RRF_K + rank)
+        for rank, i in enumerate(bm25_top, start=1):
+            fused[idx.ids[i]] = fused.get(idx.ids[i], 0.0) + 1 / (self.RRF_K + rank)
+        by_id = {c.chunk_id: c for c in vector}
+        for i in bm25_top:                                            # BM25-only finds: no cosine score
+            by_id.setdefault(idx.ids[i], _to_chunk({"id": idx.ids[i], "text": idx.texts[i],
+                                                    "metadata": idx.metadatas[i]}, None))
+        order = sorted(fused, key=lambda cid: -fused[cid])            # stable: ties keep vector order
+        return Hits([by_id[cid] for cid in order[:k]], vector[0].similarity if vector else None)
+
+
+RETRIEVERS: dict[str, Retriever] = {"vector": VectorRetriever(), "hybrid": HybridRetriever()}
 
 
 def get_retriever(mode: str) -> Retriever:
     if mode not in RETRIEVERS:
-        raise NotImplementedError(f"retrieval mode {mode!r} is not built yet (hybrid lands in P8)")
+        raise NotImplementedError(f"unknown retrieval mode {mode!r} (known: {sorted(RETRIEVERS)})")
     return RETRIEVERS[mode]
 
 
@@ -125,7 +214,7 @@ async def retrieve(store: Store, principal: Principal, question: str, settings: 
         if remaining <= 0:
             raise RetrievalTimeout(f"retrieval exceeded {settings.retrieval_timeout_s}s")
         try:
-            chunks = await asyncio.wait_for(
+            hits = await asyncio.wait_for(
                 asyncio.to_thread(retriever.search, store, active, question, settings.retrieval_k),
                 timeout=remaining,
             )
@@ -140,8 +229,9 @@ async def retrieve(store: Store, principal: Principal, question: str, settings: 
             active = fresh
         except Exception as exc:     # anything else: "try again", never a half answer
             raise RetrievalError(f"{type(exc).__name__}: {exc}") from exc
-    assert_isolation(chunks, company_id, active.version)
-    return RetrievalResult(company_id, active.version, chunks, (time.perf_counter() - started) * 1000)
+    assert_isolation(hits.chunks, company_id, active.version)
+    return RetrievalResult(company_id, active.version, hits.chunks, (time.perf_counter() - started) * 1000,
+                           hits.top_similarity)
 
 
 def passes_prefilter(result: RetrievalResult, min_similarity: float) -> bool:

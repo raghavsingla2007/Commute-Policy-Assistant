@@ -28,6 +28,15 @@ def client(tmp_path, monkeypatch):
         yield c
 
 
+@pytest.fixture
+def hybrid_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("RETRIEVAL_MODE", "hybrid")
+    with TestClient(app) as c:
+        assert app.state.settings.retrieval_mode == "hybrid"
+        yield c
+
+
 def auth(company="kestrel", role="admin") -> dict:
     return {"Authorization": f"Bearer {mint_token(app.state.settings, company, role, f'{role}-user')}"}
 
@@ -136,6 +145,15 @@ def test_upgrade_then_answers_come_from_v2(client):
 
 
 def test_readers_during_the_flip_see_v1_or_v2_never_a_mix(client):
+    readers_during_flip(client)
+
+
+def test_readers_during_the_flip_hybrid_mode(hybrid_client):
+    """(3) The same live-upgrade-under-load test with BM25 + vector retrieval."""
+    readers_during_flip(hybrid_client)
+
+
+def readers_during_flip(client):
     """4 readers ask continuously while the admin upgrades Kestrel v1 -> v2.
     Each answer must be wholly v1 or wholly v2. The only other allowed outcome is the documented 503."""
     employee = auth(role="employee")

@@ -1,0 +1,37 @@
+{
+  "cases_scored": 25,
+  "pass": 23,
+  "pass_rate": 0.92,
+  "status_accuracy": 0.96,
+  "false_refusals": 1,
+  "false_refusal_reasons": {
+    "unverified": 1
+  },
+  "not_covered_accuracy": 1.0,
+  "must_include_pass_rate": 0.917,
+  "must_not_pass_rate": 1.0,
+  "citation_correct_rate": 1.0,
+  "unsupported_claims": 0,
+  "leaks": 0,
+  "verifier_rejections": 1,
+  "bad_citations": 0,
+  "below_threshold": 2,
+  "malformed_outputs": 0,
+  "unavailable": 0,
+  "llm_calls_max": 1,
+  "http_429": 0,
+  "hit@1": 0.769,
+  "hit@3": 1.0,
+  "latency_ms": {
+    "p50": 829.1,
+    "p95": 1373.6,
+    "max": 2340.8,
+    "n": 25
+  },
+  "llm": "groq",
+  "model": "openai/gpt-oss-20b",
+  "prompt": "v1+reasoning",
+  "retrieval": "vector",
+  "split": "dev",
+  "threshold": 0.15
+}

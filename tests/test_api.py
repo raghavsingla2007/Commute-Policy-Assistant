@@ -16,7 +16,7 @@ from app import messages, retrieval
 from app.auth import mint_token
 from app.llm import FakeLLM, LLMUnavailable
 from app.main import app
-from app.retrieval import RetrievedChunk
+from app.retrieval import Hits, RetrievedChunk
 
 ASK_KEYS = {"status", "answer", "citations", "company_id", "policy_version", "request_id"}
 ERROR_KEYS = {"status", "message", "request_id"}
@@ -184,7 +184,7 @@ class ForcedRetriever:
 
     def search(self, store, active, question, k):
         time.sleep(self.sleep_s)
-        return self.chunks
+        return Hits.of(self.chunks)
 
 
 FOREIGN = RetrievedChunk("orbitron:v1:s4:p1", "Section 4 Night\nAll employees after 11:00 PM. Nimbus Rides.", "orbitron",
