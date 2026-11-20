@@ -39,14 +39,14 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 | R12 | Explicit "not covered" → plain message pointing to desk | MUST | `app/ask.py`, `app/messages.py`, `app/main.py` | `test_api.py::test_not_covered_shape_hides_reason`; eval not-covered (DEV 11/11 with Groq) | done (P6) |
 | R13 | No obedience to instructions in docs or question | MUST | `app/prompts.py` + structural guards (escaping, schema, citations, verifier, foreign-company check) | `test_prompts.py`, `test_ask.py`, eval `injection` (DEV t-inj-doc, k-inj-q pass with Groq) | partial (P5): HELD-OUT injection cases measured in P7 |
 | R14 | Slow retrieval / LLM failure → "try again", no hang/half answer | MUST | `app/retrieval.py` (0.5 s), `app/llm.py` (2.2 s), `app/main.py` (2.8 s deadline, 503 mapping), `app/middleware.py` (catch-all) | `test_api.py::test_503_*` (LLM timeout, 429, malformed, slow retrieval, isolation, deadline, unhandled, middleware) | done (P6) |
-| R15 | p95 ≤ 3 s incl. LLM | SHOULD | timeouts in `app/config.py`, warm-up in `app/main.py` | eval `--llm groq` over HTTP | partial (P6): DEV p95 945 ms (300 tokens) / 1784 ms (500 tokens); HELD-OUT `--repeat 3` in P7 |
+| R15 | p95 ≤ 3 s incl. LLM | SHOULD | timeouts in `app/config.py`, warm-up in `app/main.py` | `eval/run_eval.py --llm groq --repeat 3` | **done (P7): p95 1264 ms over 161 responses (all 55 × 3), p50 766, max 2148; 1 timeout 503 (2,422 ms)** |
 | R16 | ≤ 2 LLM calls per question | MUST | `app/llm.py` (`CallBudget`), `app/ask.py` | `test_llm.py::test_budget_allows_two_and_raises_on_third`, `test_ask.py::test_exactly_one_llm_call…`, eval `llm_calls_max` = 1 | done (P5) |
 | R17 | ≤ 3 cited chunks per answer; README says how | MUST | `app/retrieval.py` (k from config, validated 1–3), `app/schemas.py` | `test_retrieval.py::test_k_comes_from_config`; `test_budget.py` (P5) | partial (P4): retrieval never returns more than k ≤ 3 |
-| R18 | ≥ 10 verified questions incl. paraphrase, cross-company, not-covered | MUST (10) / SHOULD (37) | `eval/cases.jsonl` | `test_eval_cases.py` (shape, expectations traced to policy text); eval run (P7) | partial (P4): 55 cases (DEV 25 / HELD-OUT 30), refrozen once before tuning; retrieval-only run done (§8.4), answer scoring P7 |
+| R18 | ≥ 10 verified questions incl. paraphrase, cross-company, not-covered | MUST (10) / SHOULD (37) | `eval/cases.jsonl` | `test_eval_cases.py`; P7 real run over HTTP | done (P7): 55 cases run with Groq; DEV 25/25, HELD-OUT 24/30 (raw 22/30 before the scorer fix) |
 | R19 | JSONL fields exactly `id,input,expected,actual,pass,notes` | MUST | `eval/run_eval.py` | `test_eval_smoke.py` (55 records, exact keys, auth case 401) | done (P6) |
-| R20 | Retrieval + answer quality scoring I define | SHOULD | `eval/metrics.py` | `test_metrics.py` (37); §8.4 | partial (P4): normaliser + hit@1/hit@3/MRR/latency; answer metrics P7 |
+| R20 | Retrieval + answer quality scoring I define | SHOULD | `eval/metrics.py`, `eval/run_eval.py` | `test_metrics.py`, `test_leak_metric.py`, `test_eval_smoke.py`; §8.4 | done (P7) |
 | R21 | README: run, design, trade-offs, start command | SHOULD | `README.md` | P9 review | planned |
-| R22 | Eval report incl. known failures, limitations, ≥1 trade-off | SHOULD | `docs/EVAL_REPORT.md` | P9 review | planned |
+| R22 | Eval report incl. known failures, limitations, ≥1 trade-off | SHOULD | `docs/EVAL_REPORT.md` | review | draft (P7): results, latency, determinism, failure table, limitations, 3 trade-offs; P8 hybrid section is a placeholder |
 | R23 | 2-minute recording | SHOULD | `scripts/demo.sh` | recording | planned |
 | R24 | 10-minute gate: one command, tests pass, eval runs | MUST | `Dockerfile`, `docker-compose.yml` | fresh-clone rehearsal (P0, P9) | done for P0 skeleton: green in Docker (fresh copy: build 181 s + gate 14 s) and in local venv (fresh copy 51 s); re-rehearse in P9 |
 | R25 | Bonus: one retrieval improvement, before/after, cost | NICE | `app/retrieval.py` (hybrid) | eval vector vs hybrid | planned; P4 `Retriever` interface + `RETRIEVERS` registry ready, vector baseline in §8.4 |
@@ -58,7 +58,7 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 |---|---|---|---|---|---|
 | A1 | Grounding verifier: every number/time/₹/duration in answer must appear in cited chunks (or the question); answer naming another company is unverified | SHOULD | `app/grounding.py`, `app/textnorm.py` | `test_grounding.py` (incl. false-positive guards), eval unsupported-claim count (independent re-check from policy files) | done (P5) |
 | A2 | LLM verdict is the primary not-covered gate; threshold is a cheap pre-filter | MUST | `app/retrieval.py` (`passes_prefilter`), `app/ask.py`, `app/config.py` | §8.6 DEV distribution; eval near-miss traps (P7) | partial (P4): threshold 0.15 chosen on DEV; LLM gate in P5 |
-| A3 | DEV / HELD-OUT eval split; tune only on DEV | SHOULD | `eval/cases.jsonl` (`split` in notes) | §8 reports both | planned |
+| A3 | DEV / HELD-OUT eval split; tune only on DEV | SHOULD | `eval/cases.jsonl` (`split` in notes), `eval/freeze.py` | §8.4 reports both; HELD-OUT run once with real Groq (P7) after all tuning | done (P7); HELD-OUT *scoring* changed once after the run (typographic scorer bug, D79), system unchanged |
 | A4 | Warm embedder + Chroma at startup | SHOULD | `app/main.py` (lifespan `warm_up`) | `test_health.py`; first-request latency in eval (P7) | done: model warm-up (P0) + one query per active collection (P2, `Store.warm`); startup incl. seeding 2423 ms, restart 473 ms in Docker |
 | A5 | Ingestion concurrency safety | MUST | `app/ingest.py`, `app/store.py` | `test_store_ingest.py::test_concurrent_same_version_one_wins`, `::test_concurrent_without_lock_database_still_guards`, `::test_compare_and_swap_rejects_stale_expected_version` | done (P2) |
 | A6 | Secret scan in the test suite (working tree, not git history) | MUST | `tests/test_no_secrets.py` | pytest | done (P0) |
@@ -289,6 +289,12 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | D75 | Eval over HTTP (TestClient) with the app's internal `result_sink` hook (None in normal runs) supplying reason/retrieved sections/llm_calls/causes per request_id; Kestrel v2 ingested through `POST /admin/policies` | Expose `reason` in the API; parse logs | The API stays clean (D60) and the eval still measures internals | The hook is one attribute on `app.state` that production never sets |
 | D76 | Control characters (except tab/newline/CR) in a question are rejected (422), not stripped | Strip silently | Silent changes to a question are surprising; a null byte is never legitimate | — |
 | D77 | `/ask` checks the token before the body: a bad token + bad body is 401, never 422 | Validate body first | Unauthenticated callers learn nothing about input rules | — |
+| D78 | Leak metric implemented as §8.2 defines it: foreign retrieved chunk (company of each retrieved chunk via the eval hook), foreign cited doc_id, or foreign canary in the shown text | Canary-only check (what P5/P6 runner did) | Found in P7 Step A: the runner only checked canaries; now it matches the log. Proven non-vacuous by a test-only leaky retriever | doc_id → company relies on the `<company>-…` doc_id naming of the sample data |
+| D79 | Scorer folds typographic variants (U+2010–2014, U+2212 → "-", NBSP/U+202F/thin spaces → " ", curly quotes) **in `eval/metrics.py` only**; stored answers rescored with `--rescore` (no LLM calls) | Change `app/textnorm.py` (shared with the verifier) | Genuine scorer bug found on HELD-OUT (`o-dir-noshow`, `k-para-noshow`: "30‑day" with U+2011 ≠ "30-day"). The verifier reads digits only and is frozen in P7, so the app normaliser stays as is | HELD-OUT *scoring* changed after seeing HELD-OUT; reported raw (22/30) and fixed (24/30). System unchanged |
+| D80 | p95 = `statistics.quantiles(n=20)[18]` (exclusive method) as §8.1 planned; P4–P6 runs used `quantiles(n=100, inclusive)[94]` | Keep the earlier method | Matches the plan; earlier phase numbers stay as logged | Small differences vs earlier phases' p95 |
+| D81 | "Confidently wrong" = answered with a must_include group missing or a must_not_include phrase present; every such case is also reviewed by hand | Trust the metric alone | The metric can't tell a wrong answer from a correctly phrased answer outside the phrase list (2 such cases) | Manual step |
+| D82 | Deliverable `eval/eval_set.jsonl` is produced by `--export <result file>` (exactly the six fields, real `actual`/`pass`) at the end of P8; `eval/cases.jsonl` stays the frozen inputs | Hand-assembled file | One command, reproducible, from a real run | — |
+| D83 | Test-only "leaky" retriever lives only in `tests/test_leak_metric.py` (registered via monkeypatch); `RETRIEVAL_MODE` still accepts only vector/hybrid | Config flag | Can't be switched on in production (tested) | — |
 | D48 | Wording fixes found while drafting cases: Tamarind §3 → "Booking Cut-off", "Regular roster trips must be requested…" (owner decision); Orbitron §7 made an exhaustive list ("…; no other trips count as ad-hoc trips") so airport stays clearly SILENT; `k-nc-medical` replaced by `k-nc-maternity` because Kestrel §6 defines ad-hoc as *any* off-roster trip (a hospital trip is covered); `t-inj-doc` asks "Am I eligible for company cabs?" so a correct refusal can't echo "free cabs anywhere" | Keep the original wording/cases | Each removed a case where a correct answer could be scored wrong | Cases now differ slightly from the plan in §8.3 (updated) |
 
 ---
@@ -497,9 +503,10 @@ Body `{"markdown": "<the whole policy file>"}` (`extra=forbid`). `company_id`, `
 - Scoring rules for `expected`: see D46; text matching uses the normaliser in `eval/metrics.py` (D53).
 - **P4 retrieval-only mode** (current): no LLM yet. Per case the runner records retrieved sections + similarities, top-1 similarity, top-1/top-2 margin, rank, pre-filter verdict, latency, foreign-chunk count; `pass` = expected section(s) in top 3 (answerable) or zero foreign chunks (others). Output `eval/results/retrieval-only_<retrieval>_<split>.jsonl` + `.summary.json`. Auth cases are skipped until `/ask` exists (P6).
 - **Rate limits (Groq):** runner paces with `--min-interval` (default 2.5 s between calls, configurable), honours `Retry-After` on 429 by waiting and retrying **that case once at runner level** (never inside a request). 429 count reported; p95 computed over completed requests and the 429 count listed beside it. Free-tier limits checked in the Groq console at run time and recorded here — not assumed.
-- **Latency:** wall-clock per `/ask`; p50/p95/max via `statistics.quantiles(n=20)`; Groq run uses `--repeat 3`. FakeLLM p95 = pipeline overhead; Groq p95 = the real number. First-request (post-warm-up) latency reported separately.
+- **Latency:** client wall clock per `/ask` over HTTP (TestClient), pauses not timed; p50 = median, **p95 = `statistics.quantiles(n=20)[18]`** over 200 responses; per-stage `retrieve_ms`/`llm_ms` from the internal hook; Groq latency run uses `--repeat 3`. FakeLLM p95 = pipeline overhead; Groq p95 = the real number. First-request (post-warm-up) latency reported separately.
 - Cases are not edited to make them pass. Failures stay, with cause in `notes` and §9.
 - **Exit code:** the runner exits 0 whenever it finishes, even if quality cases fail; non-zero only on a crash. A FakeLLM run prints: `FakeLLM run: pipeline check only; quality metrics need --llm groq`.
+- **P7 tooling:** `--name` (output stem), `--repeat` with determinism report (status / key-fact flips across repeats), `--max-429-rate 0.10` abort (exit 3), `--quota` (Groq rate-limit headers), `--rescore` (re-apply the scorer to stored answers, no LLM calls), `--export` (writes the deliverable `eval/eval_set.jsonl` with exactly the six fields from a result file; **generated at the end of P8**, after the final retrieval mode is settled). Summary files report DEV, HELD-OUT and all separately, with counts.
 - **Committed results:** `eval/results/groq_*.jsonl` (real Groq runs, run by the owner) are committed and linked from the README; fake-run outputs are gitignored.
 
 ### 8.2 Metrics
@@ -649,9 +656,36 @@ Latency includes the query embedding. It varies between runs on this machine (p9
 | groq × vector, v1 | DEV | 25 | 25 | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 1.000 | 0 | 0 | 0 | 0 | 1 | 880 / 1563 (run 2) |
 | groq × vector, v1, HTTP (P6) | DEV | 25 | 25 | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 1.000 | 0 | 0 | 0 | 0 | 1 | 753 / 945 |
 | fake × vector, HTTP (P6) | all (55 incl. auth) | 55 | 32 | 0.709 | 0 | 0.111 | 0.812 / 0.945 | 0.812 | 0 | 0 | 0 | 0 | 1 | 15 / 25 |
-| groq × vector | HELD-OUT | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run |
+| **groq × vector, v1, HTTP, P7 single pass (rescored, D79)** | **DEV** | 25 | **25** | 25/25 | 0/13 | 11/11 | 13/13 / 25/25 | 14/14 | **0** | **0** | 0 | 0 | 1 | see latency |
+| **groq × vector, v1, HTTP, P7 single pass (rescored, D79)** | **HELD-OUT** | 30 | **24** (raw 22) | 26/30 | 4/19 | 7/7 | 13/15 / 30/30 | 16/16 | **0** | **0** | 1 | 0 | 1 | see latency |
+| fake × vector, HTTP (P7 gate) | DEV / HELD-OUT | 25 / 30 | 12 / 20 | 16/25 / 23/30 | 0 / 0 | 2/11 / 0/7 | 10/13 / 23/25 — 16/19 / 29/30 | 10/14 / 19/22 | 0 | 0 | 0 | 0 | 1 | 22 / 61 (all) |
 
 FakeLLM fails all not-covered traps (16 of 18) as expected: it always answers from S1.
+
+**P7 real-LLM measurement** (`eval/results/groq_vector_full_p7.jsonl` raw, `groq_vector_full_p7_rescored.jsonl` after the scorer fix; latency `groq_vector_full_p7_latency.jsonl`). Run 2026-11-20 14:38–15:10 UTC (20:08–20:40 IST), home network → Colima VM → Groq; quota before: 999/1000 requests left, 8,000 TPM. n is small: one case = 3–4 points.
+
+| Metric | DEV | HELD-OUT | All |
+|---|---|---|---|
+| Pass | 25/25 | 24/30 (raw 22/30) | 49/55 (raw 47/55) |
+| Status accuracy | 25/25 | 26/30 | 51/55 |
+| Not-covered accuracy | 11/11 | 7/7 | 18/18 |
+| False refusals | 0/13 | 4/19 (llm_not_covered 3, unverified 1) | 4/32 |
+| Confidently wrong (metric) / manual review | 0 / 0 | 2 (raw 4) / 0: both correct answers with phrasing outside the phrase list | 2 / 0 |
+| must_include / must_not_include | 13/13, 25/25 | 13/15, 30/30 | 26/28, 55/55 |
+| Citation correct | 14/14 | 16/16 | 30/30 |
+| Leaks / unsupported claims | 0 / 0 | 0 / 0 | **0 / 0** |
+| Verifier rejections | 0 | 1 (unsupported value) | 1 |
+| Below threshold / malformed / truncated | 2 / 0 / 0 | 0 / 0 / 0 | 2 / 0 / 0 |
+| LLM calls max | 1 | 1 | 1 |
+| hit@1 / hit@3 / MRR | 10/13, 13/13, 0.859 | 16/19, 17/19, 0.868 | 26/32, 30/32, 0.865 |
+
+Per category (all 55): auth 1/1, boundary 4/5, cross_company 4/4, direct 7/8, grounding 2/2, hinglish 1/2, injection 4/5, leak_bait 2/2, **multi_section 0/2**, near_miss 8/8, not_covered 10/10, paraphrase 7/7, post_version 4/5, terse 3/3, unrelated 3/3.
+
+**Latency** (`--repeat 3`, 165 requests, 156 LLM calls, 0 × 429): client wall clock p50 **766 ms**, **p95 1264 ms**, max 2148 ms over 161 responses with 200 → **meets ≤ 3 s**. Per stage: retrieve p50 18 / p95 35 ms; LLM p50 749 / p95 1250 ms (n 155). One 503 (Groq call timed out, 2,422 ms, `k-nc-holiday` repeat 2); 3 expected 401s (auth case).
+
+**Determinism** (3 repeats): status flips 2 (`t-trap-claim` not_covered/not_covered/answered, all allowed and passing; `k-nc-holiday` one 503 = infra); key-fact (must_include) flips 0; wording differs in 10 cases.
+
+**Failure analysis:** see `docs/EVAL_REPORT.md` §5 (9 rows; UNSAFE outcomes 0).
 
 **Answer quality (P7)**
 
@@ -682,11 +716,16 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 | 2026-11-19 | P2 | Ingesting one 10-section policy took ~2 s; full suite 84 s. Measured: one 7-word query embedding = **490 ms** median in Docker, 442 ms locally | Chroma's MiniLM tokenizer pads every text to 256 tokens (`enable_padding(length=256)`), so each query runs a full 256-token pass. On Mac it also defaults to the CoreML provider | `app/embeddings.py` pads each text to its own length: **26 ms** median in Docker, 5 ms locally, identical vectors (8.6e-8). Suite now 13 s locally, 33 s in Docker (D31) |
 | 2026-11-19 | P2 | First fix attempt (pad to longest in batch) crashed: "inhomogeneous shape" | Chroma tokenizes each text separately, so different lengths can't be stacked | Embed one text per call |
 | 2026-11-19 | P2 | `DefaultEmbeddingFunction` has no `tokenizer` attribute | It wraps `ONNXMiniLM_L6_V2` | Use `ONNXMiniLM_L6_V2` directly |
+| 2026-11-20 | P7 | Step A: leak metric completed (D78) + `test_leak_metric.py` (leaky test-only retriever). Step B: quota 999/1000. Step C: Groq single pass, all 55, DEV 25/25, HELD-OUT 22/30 raw → 24/30 after the scorer bug fix (D79, rescored without LLM calls). Step D: `--repeat 3`, p95 1264 ms, 0 × 429, 1 timeout, 2 status flips (1 allowed, 1 infra), 0 key-fact flips. Step E: failure table (UNSAFE 0). Step G: `docs/EVAL_REPORT.md` draft. Runner: `--name/--quota/--rescore/--export/--max-429-rate`, per-split and per-category summaries, `quantiles(n=20)[18]`. D78–D83. No change to prompt, threshold, K, retrieval or verifier | **green in Docker**: 421 passed + 1 skipped (online and `--network none`), FakeLLM eval exit 0 | (to be filled by owner) |
 | 2026-11-20 | P6 | P5 patches: verifier rule 2 (D67), `finish_reason=length` → 503 (D68). HTTP: `POST /ask` (AskRequest, deadline, 503 mapping, Retry-After), `app/middleware.py` (request id, 413, catch-all), 401/403/409/413/422/500/503 bodies; `POST /admin/policies` + `GET /admin/policies/status`; retrieval NotFound retry (D74); eval over HTTP with admin-API upgrade and auth case. Tests: `test_api.py` (41), `test_admin.py` (13), `test_eval_smoke.py`, + verifier/truncation/retry tests. DEV real runs: 25/25 at 300 and at 500 tokens; kept 300. D67–D77 | **green in Docker**: 415 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM over HTTP); compose without `.env` → `llm:"fake"`, with `.env` → `llm:"groq"` | (to be filled by owner) |
 | 2026-11-20 | P5 | `app/llm.py` (GroqLLM over httpx, FakeLLM + 6 test modes, CallBudget, strict parse), `app/prompts.py` (v1 + reasoning variant), `app/grounding.py` (citations, verifier, foreign-company check, rendering, label strip), `app/ask.py` core `answer()`, `app/schemas.py`, `app/messages.py`, `app/textnorm.py`; eval `--llm fake|groq` through `answer()`; README LLM section. Groq checked live: Llama 404 → gpt-oss-20b. DEV: v1 25/25 twice, reasoning A/B rejected. D57–D66 | **green in Docker**: 348 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM); live Groq test passed when enabled | (to be filled by owner) |
 | 2026-11-20 | P4 | Step 1: +18 eval cases (DEV +11, HELD-OUT +7: multi-section, boundary, leak-bait, Hinglish) → 55; one logged refreeze (§8.5). Step 2: `eval/metrics.py` normaliser + `test_metrics.py` (37). Step 3: `app/retrieval.py` (Retriever interface, 0.5 s timeout, isolation assertion, pre-filter), `Store.query`, `test_retrieval.py` (14), retrieval-only eval runner (hit@1/hit@3/MRR, similarity, margin, latency). Threshold 0.15 from DEV (§8.6). HELD-OUT measured once (§8.4). D49–D56 | **green in Docker**: 253 passed (online and `--network none`), eval exit 0. Local venv not run | (to be filled by owner) |
 | 2026-11-20 | P3 | Docker pytest: 5 failed + 6 errors, `OSError: [Errno 24] Too many open files` | Every `TestClient(app)` start created a new ONNX session and a Chroma client and never closed them; the new auth tests started the app ~30 times | `shared_embedder()` (one model per process), `Store.close()` at shutdown, one module-scoped app in `test_auth.py`, store fixture closes (D45). Then 184 passed in 25 s (faster than P2's 33 s) |
 | 2026-11-20 | P3 | Local `.venv/bin/python` and `cat` hung for minutes | The project is on the iCloud-synced Desktop; macOS had offloaded 181 `.venv` files and 7 small repo files (`find -flags +dataless`), so each read waited for a download | Not a repo bug. Reading the 7 repo files restored them; P3 was verified in Docker only. Local venv not re-run (would need the offloaded files re-downloaded or the folder moved out of iCloud, which is a machine change I haven't made) |
+| 2026-11-20 | P7 | **Scorer bug** on HELD-OUT `o-dir-noshow`, `k-para-noshow`: correct answers "30‑day"/"7‑day suspension" failed must_include "30-day"/"7-day" | The model writes U+2011 non-breaking hyphens; the scorer's normaliser didn't fold them, so the same spelling didn't match (the log, D53, says equivalent spellings compare equal) | `eval/metrics.py` folds typographic variants (D79) + test; rescored stored answers: HELD-OUT 22/30 → 24/30, DEV 25/25 unchanged. HELD-OUT scoring no longer pristine |
+| 2026-11-20 | P7 | **Eval gap**: the leak metric counted only canaries, not foreign retrieved/cited chunks as §8.2 defines | P5/P6 runner implemented part of the definition | `retrieved_companies` added to the internal result; `find_leaks` checks all three (D78); `test_leak_metric.py` proves it reports leaks when defences are bypassed |
+| 2026-11-20 | P7 | Leak-metric test first failed: no canary in the answer | The probe question retrieved Orbitron §4 first, not §1 (where the canaries are) | Probe question reworded to match §1 ("Who operates the transport…"). Test-only |
+| 2026-11-20 | P7 | Known failures (HELD-OUT, left as is): `t-multi-elig-cutoff`, `o-multi-weekend-cutoff` (retrieval miss → refusal), `k-inj-doc-v2` (model over-caution), `t-hing-escort` (verifier false-reject: "9 baje" has no ":00"), `o-dir-escort` and `k-bnd-exact` (correct answers outside the phrase lists) | See `docs/EVAL_REPORT.md` §5 | Not tuned (HELD-OUT). All SAFE: refusals or correct answers |
 | 2026-11-20 | P6 | 10 tests in `test_api.py` failed with `'State' object has no attribute 'settings'` after `test_503_from_middleware_catch_all` | pytest's `monkeypatch.setattr` on Starlette's `State` doesn't restore the value on undo (verified in isolation: value gone after undo) | Save/restore `app.state.settings` by hand in that test; other fixtures already assign directly |
 | 2026-11-20 | P6 | Simulated 503 (`LLM_TIMEOUT_S=0.01`) logged `cause=llm:connection: ConnectError`, not `timeout` | With a 10 ms budget httpx failed while connecting and raised `ConnectError` | No change: both map to the same 503; the log shows the real cause |
 | 2026-11-20 | P5 | First Groq probe: `llama-3.1-8b-instant` and `llama-3.3-70b-versatile` → 404 "does not exist or you do not have access" | The free-tier key has no Llama access (docs list them as "contact sales") | Switched the default to `openai/gpt-oss-20b` (D57) |
@@ -726,6 +765,9 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - Retrieval timeout returns at 0.5 s, but the worker thread keeps running until its search ends (threads can't be cancelled in Python). Under sustained slowness these threads could pile up in the default pool.
 - The pre-filter (0.15) catches only clearly unrelated questions; similarity distributions of answerable and silent near-miss questions overlap (§8.6).
 - The corpus is ~10 sections per company, so hit@3 is near 100% and can't separate vector from hybrid; hit@1 and MRR are the useful numbers.
+- Verifier gap: a bare hour in the question ("9 baje", "at 9") doesn't support "9 PM" in the answer (D62 maps only H:MM), so such answers are refused (`t-hing-escort`).
+- Rule-based scoring misses correct answers phrased outside the phrase list (`o-dir-escort`, `k-bnd-exact`), so HELD-OUT pass understates quality by 2 cases; the manual review is in the report.
+- Determinism: gpt-oss at temperature 0 changed a trap verdict in 1 of 55 cases across 3 repeats (both outcomes allowed).
 - The eval's HTTP path is FastAPI's TestClient (in-process ASGI): it includes routing, middleware, auth and serialisation, but not a real network socket.
 - An admin upload holds one worker thread for ~1 s while it embeds and writes (fine for a few uploads a year).
 - Request-ID, body limits and the deadline are per process; behind a load balancer the proxy should also enforce limits.
@@ -818,6 +860,11 @@ TOKEN=$(curl -s -X POST localhost:8000/dev/token -H 'content-type: application/j
 python3 -c 'import json;print(json.dumps({"markdown":open("data/policies/kestrel_v2.md").read()}))' | \
   curl -s -X POST localhost:8000/admin/policies -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @-   # ✔ P6 live upgrade
 curl -s localhost:8000/admin/policies/status -H "Authorization: Bearer $TOKEN"   # ✔ P6
+docker compose run --rm api python -m eval.run_eval --quota      # ✔ P7 Groq limits (prints headers only)
+docker compose run --rm api python -m eval.run_eval --llm groq --split all --name groq_vector_full_p7          # ✔ P7 quality (~8 min)
+docker compose run --rm api python -m eval.run_eval --llm groq --split all --repeat 3 --name groq_vector_full_p7_latency --quiet   # ✔ P7 latency (~23 min)
+docker compose run --rm api python -m eval.run_eval --rescore eval/results/groq_vector_full_p7.jsonl --name groq_vector_full_p7_rescored   # ✔ P7
+docker compose run --rm api python -m eval.run_eval --export eval/results/<final>.jsonl   # P8: writes eval/eval_set.jsonl
 # --- Planned ---
 docker compose run --rm api python -m eval.run_eval --llm groq --repeat 3 --split heldout
 docker compose run --rm api python -m eval.run_eval --retrieval hybrid
@@ -859,8 +906,8 @@ bash scripts/demo.sh
 | P5 | MUST | `llm.py` (Fake, Groq, budget, parse), `prompts.py`, citation check, `ask.py` core, eval `--llm` | `test_llm.py`, `test_prompts.py`, `test_ask.py` green ✔; DEV real-LLM run ✔ |
 | P5b | SHOULD | `grounding.py` | `test_grounding.py` green ✔ |
 | P6 | MUST | `/ask` HTTP + deadline + error mapping, middleware, admin API + status, live-upgrade readers, eval over HTTP | `test_api.py`, `test_admin.py`, `test_eval_smoke.py` green ✔; curl transcripts ✔ |
-| P7a | MUST | ≥ 10 cases + metrics + runner, FakeLLM | eval runs in container; leaks = 0 |
-| P7b | SHOULD | all 34 cases, freeze HELD-OUT, tune on DEV, Groq run + p95 | §8.4 filled with real numbers |
+| P7a | MUST | ≥ 10 cases + metrics + runner, FakeLLM | eval runs in container; leaks = 0 ✔ |
+| P7b | SHOULD | all 55 cases, HELD-OUT frozen, Groq quality + latency runs, failure analysis, report draft | §8.4 filled with real numbers ✔ |
 | P8 | NICE | hybrid BM25 + RRF; before/after | hybrid rows in §8.4 |
 | P9 | SHOULD | README, EVAL_REPORT, demo script, fresh-clone gate rehearsal (timed) | gate < 10 min on a clean clone with no key |
 
@@ -877,6 +924,29 @@ bash scripts/demo.sh
 | 2026-11-20 | P2 | `store.py` (registry, CAS flip, janitor, warm), `ingest.py` pipeline + seeding, `embeddings.py` (fast MiniLM), `scripts/ingest_cli.py`, startup = janitor → seed → warm. `test_store_ingest.py` (15) + `test_embeddings.py` (1). D31–D39 | **green in Docker**: 88 passed (online and `--network none`), eval exit 0, seeding once, restart no re-seed | (to be filled by owner) |
 | 2026-11-20 | P3 | `auth.py` (Principal, HS256-pinned verify, uniform 401, mint_token), `/dev/token` (404 unless DEV_MODE), `/whoami`, refuse-to-start log line, `scripts/issue_token.py`; `test_auth.py` (47), `test_principal_only.py` (5). Owner decisions applied: Tamarind §3 reworded; D31 comment block + same-embedder tests. Pulled forward from P7: `eval/cases.jsonl` (37), `eval/freeze.py`, `test_eval_cases.py` (40), HELD-OUT frozen (§8.5). Orbitron §7 wording, two case swaps (D48). Fixed fd exhaustion (D45). D40–D48 | **green in Docker**: 184 passed (online and `--network none`), eval exit 0. Local venv not run (§9) | (to be filled by owner) |
 | 2026-11-19/20 | P0 | Skeleton: config, `/health` + warm-up, placeholder modules, secret-scan + health tests, eval stub, Dockerfile, compose, ignore files, `.env.example`, pinned requirements + lock record, README stub. Decisions D25–D30 added. Colima/Docker installed on the machine | **Green in Docker and local venv** (evidence below) | (to be filled by owner) |
+
+#### P7 evidence (real outputs, Docker)
+```
+$ python -m eval.run_eval --quota → {"checked_at": "2026-11-20T14:38:18+00:00", "model": "openai/gpt-oss-20b", "status": 200,
+   "x-ratelimit-limit-requests": "1000", "x-ratelimit-limit-tokens": "8000", "x-ratelimit-remaining-requests": "999", "x-ratelimit-remaining-tokens": "7876"}
+$ python -m eval.run_eval --llm groq --split all --name groq_vector_full_p7   → exit=0, 14:38:29–14:46:00 UTC, llm_calls 52, http_429 0
+  dev:     pass 25/25, status 25/25, not_covered 11/11, false_refusals 0/13, confidently_wrong 0, leaks 0, unsupported 0, hit@1 10/13, hit@3 13/13, mrr 0.859
+  heldout: pass 22/30, status 26/30, not_covered 7/7, false_refusals 4/19 {llm_not_covered 3, unverified 1}, confidently_wrong 4, leaks 0, unsupported 0,
+           hit@1 16/19, hit@3 17/19, mrr 0.868, malformed 0, truncations 0, llm_calls_max 1
+$ --rescore … → heldout pass 24/30, confidently_wrong 2; "pass changed for: ['o-dir-noshow', 'k-para-noshow']"
+$ python -m eval.run_eval --llm groq --split all --repeat 3 --name groq_vector_full_p7_latency --quiet → exit=0, 14:47:27–15:10:11 UTC
+  latency: {"samples_200": 161, "samples_total": 165, "wall_ms": {"p50": 765.5, "p95": 1264.3, "max": 2147.9}, "retrieve_ms": {"p50": 17.6, "p95": 34.6},
+            "llm_ms": {"p50": 749.1, "p95": 1249.5, "n": 155}, "p95_meets_3s": true, "count_503": 1, "count_timeouts": 1}
+  determinism: {"status_or_key_fact_flips": 2, "flipped": [t-trap-claim [nc, nc, answered] all pass; k-nc-holiday [nc, unavailable, nc]], "cases_with_different_wording": 10}
+  run: http_429 0, llm_calls_made 156, aborted_429 false
+$ gate: up->ready 4 s, /health {"status":"ok","ready":true,"llm":"groq","dev_mode":true}; "gsk_" in logs 0
+$ docker compose run --rm api pytest -q            → 421 passed, 1 skipped, 1 warning in 87.01s
+$ docker run --rm --network none <image> pytest -q → 421 passed, 1 skipped, 1 warning in 90.70s
+  per file: admin 13, api 41, ask 26, auth 47, embeddings 3, eval_cases 58, eval_smoke 2, groq_live 1, grounding 36, health 3, leak_metric 4,
+            llm 37, metrics 38, no_secrets 3, policies 68, principal_only 6, prompts 5, retrieval 16, store_ingest 15
+$ python -m eval.run_eval --quiet (FakeLLM) → eval exit=0; all pass 32/55, not_covered 2/18, leaks 0, unsupported 0, llm_calls_max 1
+$ secret grep → exit=1; key in repo files/results → none; image: GROQ_API_KEY 0, no /app/.env
+```
 
 #### P6 evidence (real outputs, Docker)
 ```

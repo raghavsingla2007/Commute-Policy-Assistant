@@ -51,7 +51,8 @@ def validate_question(question: object, max_chars: int) -> str:
 def _not_covered(principal: Principal, r: RetrievalResult, reason: str, **extra) -> AskResult:
     return AskResult(status="not_covered", message=messages.NOT_COVERED, company_id=principal.company_id,
                      policy_version=r.version, reason=reason, retrieve_ms=r.retrieve_ms,
-                     retrieved_sections=[c.section_id for c in r.chunks], **extra)
+                     retrieved_sections=[c.section_id for c in r.chunks],
+                     retrieved_companies=[c.company_id for c in r.chunks], **extra)
 
 
 async def answer(principal: Principal, question: object, ctx: AskContext, request_id: str = "-") -> AskResult:
@@ -95,4 +96,5 @@ async def _run(principal: Principal, q: str, ctx: AskContext) -> AskResult:
 
     return AskResult(status="answered", answer=strip_labels(out.answer), citations=render_citations(labels, r.chunks),
                      company_id=principal.company_id, policy_version=r.version, cited_labels=labels,
-                     retrieved_sections=[c.section_id for c in r.chunks], retrieve_ms=r.retrieve_ms, **common)
+                     retrieved_sections=[c.section_id for c in r.chunks],
+                     retrieved_companies=[c.company_id for c in r.chunks], retrieve_ms=r.retrieve_ms, **common)

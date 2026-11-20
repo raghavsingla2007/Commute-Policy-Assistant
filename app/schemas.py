@@ -70,6 +70,7 @@ class AskResult(BaseModel):
     # ---- internal (logs + eval only; the P6 HTTP response drops these) ----
     reason: Reason | None = None
     retrieved_sections: list[str] = []
+    retrieved_companies: list[str] = []  # company_id of each retrieved chunk (the eval's leak check)
     cited_labels: list[str] = []
     llm_calls: int = 0
     retrieve_ms: float = 0.0

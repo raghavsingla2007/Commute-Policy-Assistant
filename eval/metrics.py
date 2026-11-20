@@ -5,6 +5,21 @@ import statistics
 
 from app.textnorm import contains, normalise  # noqa: F401  (re-exported for tests and the runner)
 
+# Typographic variants the model emits (seen in P7: "30\u2011day", "11:00\u202fPM") that are the same
+# spelling as the expected phrase. Folded ONLY in the eval scorer: the app's normaliser (shared with the
+# grounding verifier) is unchanged, because the verifier reads digits only and must not change in P7.
+_TYPOGRAPHIC = str.maketrans({"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-",
+                              "\u2212": "-", "\u00a0": " ", "\u202f": " ", "\u2009": " ", "\u2007": " ",
+                              "\u2018": "'", "\u2019": "'"})
+
+
+def fold(text: str) -> str:
+    return text.translate(_TYPOGRAPHIC)
+
+
+def scored_contains(text: str, needle: str) -> bool:
+    return contains(fold(text), fold(needle))
+
 # ---------------------------------------------------------------- retrieval metrics
 
 def retrieval_ranks(retrieved_sections: list[str], expected: list[str], require_all: bool = False) -> int | None:
@@ -44,11 +59,11 @@ def score_answer(case: dict, actual: dict) -> dict:
     status_ok = status in exp["status"]
     include_ok = exclude_ok = citation_ok = True
     if status == "answered":
-        include_ok = all(any(contains(shown, alt) for alt in group) for group in exp["must_include"])
+        include_ok = all(any(scored_contains(shown, alt) for alt in group) for group in exp["must_include"])
         if exp["sections"]:
             cited = set(actual.get("cited_sections", []))
             need = set(exp["sections"])
             citation_ok = need <= cited if exp.get("all_sections") else bool(need & cited)
-    exclude_ok = not any(contains(shown, phrase) for phrase in exp["must_not_include"])
+    exclude_ok = not any(scored_contains(shown, phrase) for phrase in exp["must_not_include"])
     return {"status_ok": status_ok, "include_ok": include_ok, "exclude_ok": exclude_ok,
             "citation_ok": citation_ok, "pass": status_ok and include_ok and exclude_ok and citation_ok}

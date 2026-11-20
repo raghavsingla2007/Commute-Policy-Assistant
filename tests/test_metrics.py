@@ -76,3 +76,20 @@ def test_percentile():
     assert percentile(values, 50) == pytest.approx(50.5)
     assert percentile(values, 95) == pytest.approx(95.05)
     assert percentile([7.0], 95) == 7.0
+
+
+def test_scorer_folds_typographic_variants():
+    """P7 bug (o-dir-noshow, k-para-noshow): the model wrote U+2011 non-breaking hyphens."""
+    from eval.metrics import fold, scored_contains, score_answer
+
+    assert scored_contains("a 30\u2011day suspension", "30-day")
+    assert scored_contains("a 7\u2011day suspension", "7 day") is False      # hyphen vs space stays different
+    assert scored_contains("after 11:00\u202fPM", "11 PM") and scored_contains("You\u2019ll get", "you'll")
+    assert not scored_contains("a 17\u2011day suspension", "7-day")          # digit-edge guard still holds
+    assert fold("x\u2013y\u00a0z") == "x-y z"
+    case = {"expected": {"status": ["answered"], "sections": ["9"], "must_include": [["30-day"]],
+                         "must_not_include": ["7-day"]}}
+    ok = score_answer(case, {"status": "answered", "answer": "A 30\u2011day suspension.", "cited_sections": ["9"]})
+    assert ok["pass"]
+    bad = score_answer(case, {"status": "answered", "answer": "A 7\u2011day suspension.", "cited_sections": ["9"]})
+    assert not bad["include_ok"] and not bad["exclude_ok"]
