@@ -4,6 +4,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+# The fictional client companies. A company_id outside this set is rejected everywhere.
+KNOWN_COMPANIES = frozenset({"kestrel", "tamarind", "orbitron"})
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Dev-only default so `docker compose up` works with no setup. Refused when DEV_MODE is off.
 DEV_DEFAULT_JWT_SECRET = "dev-only-insecure-jwt-secret-change-me-000"
 MIN_JWT_SECRET_LENGTH = 32
@@ -29,6 +33,7 @@ class Settings:
     dev_mode: bool
     # Storage
     data_dir: Path
+    policies_dir: Path
     # Retrieval / answering
     retrieval_k: int
     retrieval_mode: str          # "vector" | "hybrid"
@@ -74,6 +79,7 @@ def load_settings() -> Settings:
         jwt_ttl_s=int(env("JWT_TTL_S", "3600")),
         dev_mode=_bool("DEV_MODE", False),
         data_dir=Path(env("DATA_DIR", "./var")),
+        policies_dir=Path(env("POLICIES_DIR", str(PROJECT_ROOT / "data" / "policies"))),
         retrieval_k=int(env("RETRIEVAL_K", "3")),
         retrieval_mode=env("RETRIEVAL_MODE", "vector").strip().lower(),
         not_covered_min_sim=float(env("NOT_COVERED_MIN_SIM", "0.20")),

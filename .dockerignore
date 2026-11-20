@@ -14,3 +14,4 @@ chroma
 eval/results/*
 !eval/results/.gitkeep
 .DS_Store
+Case Study B*.pdf

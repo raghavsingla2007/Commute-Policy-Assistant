@@ -25,3 +25,6 @@ eval/results/*
 .DS_Store
 .idea/
 .vscode/
+
+# Case-study brief: kept locally, not committed
+/Case Study B*.pdf

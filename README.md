@@ -24,3 +24,9 @@ docker compose run --rm api python -m eval.run_eval      # 3. evaluation set
 ```
 
 Design, decisions and trade-offs: see `PROJECT_LOG.md` (README sections are filled in P9).
+
+## Docker runtime
+
+Any Docker engine with Compose ≥ 2.24 works: Docker Desktop or Colima. Colima shares only your home folder with its VM,
+so if the project sits outside `~`, the `./eval/results` bind mount looks empty from inside the container. That is a
+local-machine quirk, not a product limitation.

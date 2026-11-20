@@ -4,34 +4,36 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-import chromadb
-from chromadb.config import Settings as ChromaSettings
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+from app.embeddings import MiniLMEmbedder
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from app.config import load_settings
+from app.ingest import seed_if_empty
+from app.store import Store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("app")
 
 
-def warm_up(app: FastAPI) -> None:
-    """Load the embedding model and open Chroma so the first real request is not a cold start."""
+def start_store(app: FastAPI) -> None:
+    """Open the store, clean up after any crash, seed v1 policies if missing, then warm everything.
+
+    Order matters: janitor before seeding (so stale rows can't block a seed), warm-up last.
+    """
     started = time.perf_counter()
     settings = app.state.settings
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    embedder = DefaultEmbeddingFunction()
+    embedder = MiniLMEmbedder()
     embedder(["warm-up"])  # forces the ONNX model to load
-    client = chromadb.PersistentClient(
-        path=str(settings.data_dir / "chroma"),
-        settings=ChromaSettings(anonymized_telemetry=False),
-    )
-    client.heartbeat()
-    app.state.embedder = embedder
-    app.state.chroma = client
+    store = Store(settings.data_dir, embedder)
+    store.janitor()
+    seeded = seed_if_empty(store, settings.policies_dir)
+    if seeded:
+        log.info("seeded policies: %s", seeded)
+    store.warm()  # one query per active collection
+    app.state.store = store
     app.state.ready = True
-    log.info("warm-up done in %.0f ms", (time.perf_counter() - started) * 1000)
+    log.info("startup (janitor + seed + warm-up) done in %.0f ms", (time.perf_counter() - started) * 1000)
 
 
 @asynccontextmanager
@@ -47,9 +49,9 @@ async def lifespan(app: FastAPI):
     if settings.llm_mode == "fake":
         log.warning("No LLM API key set: using FakeLLM (extractive answers, pipeline check only).")
     try:
-        warm_up(app)
+        start_store(app)
     except Exception:  # keep serving; /health reports not ready
-        log.exception("warm-up failed; /health will report ready=false")
+        log.exception("startup failed; /health will report ready=false")
     yield
 
 
