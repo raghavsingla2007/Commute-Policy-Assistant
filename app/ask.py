@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from app import messages
 from app.auth import Principal
 from app.config import Settings
-from app.grounding import (CitationError, foreign_companies, render_citations, strip_labels, unsupported_values,
+from app.grounding import (CitationError, check_values, foreign_companies, render_citations, strip_labels,
                            validate_citations)
 from app.llm import LLM, CallBudget, parse_llm_output
 from app.prompts import SYSTEM_PROMPT, build_prompt
@@ -54,12 +54,12 @@ def _not_covered(principal: Principal, r: RetrievalResult, reason: str, **extra)
                      retrieved_sections=[c.section_id for c in r.chunks], **extra)
 
 
-async def answer(principal: Principal, question: object, ctx: AskContext) -> AskResult:
+async def answer(principal: Principal, question: object, ctx: AskContext, request_id: str = "-") -> AskResult:
     q = validate_question(question, ctx.settings.max_question_chars)
     result = await _run(principal, q, ctx)
-    log.info("ask company=%s version=%s status=%s reason=%s retrieve_ms=%.0f llm_ms=%.0f llm_calls=%d q=%r",
-             principal.company_id, result.policy_version, result.status, result.reason,
-             result.retrieve_ms, result.llm_ms, result.llm_calls, q[:100])
+    log.info("ask request_id=%s company=%s version=%s status=%s reason=%s retrieve_ms=%.0f llm_ms=%.0f "
+             "llm_calls=%d q=%r", request_id, principal.company_id, result.policy_version, result.status,
+             result.reason, result.retrieve_ms, result.llm_ms, result.llm_calls, q[:100])
     return result
 
 
@@ -87,10 +87,10 @@ async def _run(principal: Principal, q: str, ctx: AskContext) -> AskResult:
         return _not_covered(principal, r, "bad_citation", detail=str(exc), **common)
 
     cited = [r.chunks[int(lab[1:]) - 1] for lab in labels]
-    missing = unsupported_values(out.answer, [c.text for c in cited] + [q])
+    problem = check_values(out.answer, [c.text for c in cited], q)
     foreign = foreign_companies(out.answer, principal.company_id)
-    if missing or foreign:
-        detail = f"unsupported values {missing}" if missing else f"names other companies {foreign}"
+    if problem or foreign:
+        detail = problem or f"names other companies {foreign}"
         return _not_covered(principal, r, "unverified", cited_labels=labels, detail=detail, **common)
 
     return AskResult(status="answered", answer=strip_labels(out.answer), citations=render_citations(labels, r.chunks),

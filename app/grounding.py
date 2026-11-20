@@ -55,15 +55,36 @@ def _twelve_hour(value: str) -> str | None:
     return None
 
 
+def _supported(value: str, text: str) -> bool:
+    alt = _twelve_hour(value)
+    return contains(text, value) or (alt is not None and contains(text, alt))
+
+
 def unsupported_values(answer: str, sources: list[str]) -> list[str]:
     """Values in the answer that no source contains (empty list = grounded)."""
     joined = "\n".join(sources)
+    return [v for v in dict.fromkeys(values_in(answer)) if not _supported(v, joined)]
 
-    def supported(v: str) -> bool:
-        alt = _twelve_hour(v)
-        return contains(joined, v) or (alt is not None and contains(joined, alt))
 
-    return [v for v in dict.fromkeys(values_in(answer)) if not supported(v)]
+def check_values(answer: str, cited_texts: list[str], question: str) -> str | None:
+    """None if the answer's values are grounded, else a short reason for the log.
+
+    Rule 1: every value must appear in a cited chunk or in the question.
+    Rule 2 (P6, closes the k-gv-echo hole): if some value is supported ONLY by the question, the answer
+    must also contain at least one value supported by the cited chunks. "Escort after 10 PM" (the
+    question's stale number, chunk says 9:00 PM) fails; "after 9:00 PM, so your 9:30 PM drop qualifies"
+    passes; an answer with no numbers is unaffected.
+    """
+    chunks = "\n".join(cited_texts)
+    values = list(dict.fromkeys(values_in(answer)))
+    missing = [v for v in values if not _supported(v, chunks) and not _supported(v, question)]
+    if missing:
+        return f"unsupported values {missing}"
+    from_chunks = [v for v in values if _supported(v, chunks)]
+    question_only = [v for v in values if v not in from_chunks]
+    if question_only and not from_chunks:
+        return f"values only from the question {question_only}"
+    return None
 
 
 def strip_labels(answer: str) -> str:

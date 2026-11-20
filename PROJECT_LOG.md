@@ -32,18 +32,18 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 | R5 | Never commit API keys | MUST | `.gitignore`, `.dockerignore`, `.env.example` | `test_no_secrets.py` (3 tests) | done (P0) |
 | R6 | Explain/change every line | MUST | small flat modules | viva | ongoing |
 | R7 | 3 fictional policies, overlapping + contradictory | MUST | `data/policies/*.md` | `test_policies.py` (sections, canaries, ground truth, silent topics) | done (P1) |
-| R8 | Ingest policy + new version; only active answers | MUST | `app/ingest.py`, `app/store.py` | `test_store_ingest.py::test_upgrade_flips_and_deletes_old_collection`; eval `post_version` (P7) | done at storage level (P2); `/ask` path in P6 |
+| R8 | Ingest policy + new version; only active answers | MUST | `app/ingest.py`, `app/store.py`, `app/main.py` (`POST /admin/policies`) | `test_store_ingest.py`, `test_admin.py::test_upgrade_then_answers_come_from_v2`, `::test_readers_during_the_flip_see_v1_or_v2_never_a_mix`; eval upgrades Kestrel through the admin API | done (P6) |
 | R9 | Failed ingestion never half-updates | MUST | `app/ingest.py` (stage→validate→CAS flip), `app/store.py` (janitor) | `test_store_ingest.py` (mid-add failure, post-validation failure, crash before flip + janitor, retry, concurrency) | done (P2) |
-| R10 | Question API behind JWT with company; server-side filter, no override | MUST | `app/auth.py`, `app/retrieval.py`, `app/schemas.py` | `test_store_ingest.py::test_collections_are_physically_separate`, `test_auth.py` (47), `test_principal_only.py` (5), `test_retrieval.py::test_no_foreign_chunk_for_any_company_and_any_question`, `::test_isolation_assertion_fires_on_forced_bad_chunk` | partial (P4): storage isolation (P2), JWT + principal-only rule (P3), retrieval from the principal's active collection + isolation assertion + 3×(all eval questions + canary bait) isolation test (P4); `/ask` in P6 |
-| R11 | Grounded answers citing document + section | MUST | `app/ask.py`, `app/grounding.py`, `app/schemas.py` | `test_grounding.py`, `test_ask.py`; eval citation metric (DEV 1.000 with Groq) | done in-process (P5); HTTP in P6 |
-| R12 | Explicit "not covered" → plain message pointing to desk | MUST | `app/ask.py`, `app/messages.py` | `test_ask.py::test_llm_not_covered_uses_fixed_message_not_model_text`, eval not-covered cases (DEV 11/11 with Groq) | done in-process (P5) |
+| R10 | Question API behind JWT with company; server-side filter, no override | MUST | `app/auth.py`, `app/retrieval.py`, `app/schemas.py` (`AskRequest`), `app/main.py` | `test_auth.py`, `test_principal_only.py`, `test_retrieval.py` isolation sweep, `test_api.py` | done (P6) |
+| R11 | Grounded answers citing document + section | MUST | `app/ask.py`, `app/grounding.py`, `app/schemas.py` | `test_grounding.py`, `test_ask.py`, `test_api.py::test_answered_shape`; eval citation metric (DEV 1.000 with Groq over HTTP) | done (P6) |
+| R12 | Explicit "not covered" → plain message pointing to desk | MUST | `app/ask.py`, `app/messages.py`, `app/main.py` | `test_api.py::test_not_covered_shape_hides_reason`; eval not-covered (DEV 11/11 with Groq) | done (P6) |
 | R13 | No obedience to instructions in docs or question | MUST | `app/prompts.py` + structural guards (escaping, schema, citations, verifier, foreign-company check) | `test_prompts.py`, `test_ask.py`, eval `injection` (DEV t-inj-doc, k-inj-q pass with Groq) | partial (P5): HELD-OUT injection cases measured in P7 |
-| R14 | Slow retrieval / LLM failure → "try again", no hang/half answer | MUST | `app/retrieval.py` (0.5 s `wait_for`), `app/ask.py`, `app/llm.py` | `test_retrieval.py::test_slow_search_times_out_at_configured_limit`, `::test_search_failure_becomes_retrieval_error`; `test_failures.py` (P6) | partial (P4): retrieval raises RetrievalTimeout/RetrievalError; mapping to 503 in P6 |
-| R15 | p95 ≤ 3 s incl. LLM | SHOULD | timeouts in `app/config.py`, warm-up in `app/main.py` | `eval/run_eval.py --llm groq` | planned |
+| R14 | Slow retrieval / LLM failure → "try again", no hang/half answer | MUST | `app/retrieval.py` (0.5 s), `app/llm.py` (2.2 s), `app/main.py` (2.8 s deadline, 503 mapping), `app/middleware.py` (catch-all) | `test_api.py::test_503_*` (LLM timeout, 429, malformed, slow retrieval, isolation, deadline, unhandled, middleware) | done (P6) |
+| R15 | p95 ≤ 3 s incl. LLM | SHOULD | timeouts in `app/config.py`, warm-up in `app/main.py` | eval `--llm groq` over HTTP | partial (P6): DEV p95 945 ms (300 tokens) / 1784 ms (500 tokens); HELD-OUT `--repeat 3` in P7 |
 | R16 | ≤ 2 LLM calls per question | MUST | `app/llm.py` (`CallBudget`), `app/ask.py` | `test_llm.py::test_budget_allows_two_and_raises_on_third`, `test_ask.py::test_exactly_one_llm_call…`, eval `llm_calls_max` = 1 | done (P5) |
 | R17 | ≤ 3 cited chunks per answer; README says how | MUST | `app/retrieval.py` (k from config, validated 1–3), `app/schemas.py` | `test_retrieval.py::test_k_comes_from_config`; `test_budget.py` (P5) | partial (P4): retrieval never returns more than k ≤ 3 |
 | R18 | ≥ 10 verified questions incl. paraphrase, cross-company, not-covered | MUST (10) / SHOULD (37) | `eval/cases.jsonl` | `test_eval_cases.py` (shape, expectations traced to policy text); eval run (P7) | partial (P4): 55 cases (DEV 25 / HELD-OUT 30), refrozen once before tuning; retrieval-only run done (§8.4), answer scoring P7 |
-| R19 | JSONL fields exactly `id,input,expected,actual,pass,notes` | MUST | `eval/run_eval.py` | `test_eval_smoke.py` (schema check) | partial (P0): stub writes the 6 exact fields; smoke test in P7a |
+| R19 | JSONL fields exactly `id,input,expected,actual,pass,notes` | MUST | `eval/run_eval.py` | `test_eval_smoke.py` (55 records, exact keys, auth case 401) | done (P6) |
 | R20 | Retrieval + answer quality scoring I define | SHOULD | `eval/metrics.py` | `test_metrics.py` (37); §8.4 | partial (P4): normaliser + hit@1/hit@3/MRR/latency; answer metrics P7 |
 | R21 | README: run, design, trade-offs, start command | SHOULD | `README.md` | P9 review | planned |
 | R22 | Eval report incl. known failures, limitations, ≥1 trade-off | SHOULD | `docs/EVAL_REPORT.md` | P9 review | planned |
@@ -64,7 +64,7 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 | A6 | Secret scan in the test suite (working tree, not git history) | MUST | `tests/test_no_secrets.py` | pytest | done (P0) |
 | A7 | DEV_MODE token endpoint: off in code, on in compose with warning | MUST | `app/config.py`, `app/main.py`, `docker-compose.yml` | `test_health.py` (secret guards), `test_auth.py` (P3) | done (P3): `/dev/token` returns 404 unless DEV_MODE=true (`test_dev_token_is_404_when_dev_mode_off`) |
 | A8 | JWT secret ≥ 32 chars enforced at startup; `iss`, `aud`, `exp` validated | MUST | `app/config.py`, `app/auth.py` | `test_health.py::test_short_jwt_secret_rejected`; `test_auth.py` (P3) | done (P3): HS256 pinned; exp/iat/iss/aud/sub required; refuse-to-start tested through the real app lifespan |
-| A9 | Logs carry only request_id, company_id, status, retrieve_ms, llm_ms, question ≤ 100 chars; never tokens/secrets/Authorization | MUST | `app/main.py`, `app/ask.py` | `test_logging.py` (P6) | planned |
+| A9 | Logs carry only request_id, company_id, status, reason, retrieve_ms, llm_ms, question ≤ 100 chars; never tokens/secrets/Authorization | MUST | `app/ask.py`, `app/main.py`, `app/middleware.py` | `test_auth.py::test_reason_logged_but_token_never_logged`, `test_ask.py::test_log_line_has_timings_and_truncated_question`, `test_api.py::test_503_unhandled_exception_logs_traceback_with_request_id`; P6 gate log scan | done (P6) |
 | A10 | Eval runner exits 0 when it finishes (quality failures included), non-zero only on crash; loud FakeLLM notice | MUST | `eval/run_eval.py` | P0 gate output | done (P0) for stub |
 | A12 | Query embedding fast enough for the 3 s budget (per-text padding, same vectors); ingest and search share one embedder | SHOULD | `app/embeddings.py` | `test_embeddings.py` (max diff < 1e-5; `test_ingest_and_search_share_one_embedder`; `test_collections_have_no_embedding_function_of_their_own`); timing in §9 | done (P2, path test P3) |
 | A13 | Company only from the Principal; no route reads a company from body/query/headers | MUST | `app/auth.py`, `app/main.py` | `test_principal_only.py` (runtime dependency walk + AST scan, each with a planted-violation self-test) | done (P3) |
@@ -91,6 +91,7 @@ app/
   grounding.py   citation validation, number/time/₹ verifier, foreign-company check, citation rendering
   ingest.py      markdown → section chunks; stage → validate → CAS flip → cleanup; per-company lock
   store.py       SQLite registry, Chroma client, startup janitor
+  middleware.py  request id (sanitised), body-size limits (413), catch-all 503; reads only x-request-id and content-length
   messages.py    fixed user-facing strings (never generated by the model)
   textnorm.py    normalise()/contains(): shared by the verifier and the eval scorer
 data/policies/   kestrel_v1.md  kestrel_v2.md  tamarind_v1.md  orbitron_v1.md
@@ -117,6 +118,9 @@ tests/
   test_grounding.py  P5: citations, verifier + guards, foreign companies, rendering, label stripping
   test_ask.py        P5: orchestrator end to end with scripted/fake LLMs, every outcome
   test_groq_live.py  P5: one real Groq call (marked `groq`, skipped by default)
+  test_api.py        P6: /ask over HTTP: shapes, 15 bad inputs, 413, every 503 cause, request ids, 8 parallel requests
+  test_admin.py      P6: admin roles, own-company rule, 409/422/500/413, status, live upgrade with concurrent readers
+  test_eval_smoke.py P6: the eval runner end to end over HTTP (exit 0, exact fields, auth case 401)
   test_no_secrets.py working-tree secret scan + planted-key self-test + .env ignored check
   (more per phase)
 docs/EVAL_REPORT.md
@@ -274,6 +278,17 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | D64 | Normaliser moved to `app/textnorm.py`; `eval/metrics.py` imports it | Keep in eval/ | Verifier and scorer must use identical matching rules; app code shouldn't import from eval/ | — |
 | D65 | Stray labels like "(S3)" are stripped from the answer text (code, after verification) | Prompt rule; leave them | Seen in a DEV answer; citations are shown separately; deterministic | — |
 | D66 | Eval P5: in-process through `answer()`, own store, `--min-interval 8` s between Groq calls (8K TPM), one runner-level retry after `Retry-After` on 429 | Hit the HTTP server | P6 switches to TestClient; pacing keeps the run inside the free tier | Excludes HTTP overhead until P6 |
+| D67 | Verifier rule 2: a value supported only by the question needs at least one value supported by the cited chunks in the same answer | Drop the question allowance; check the answer's verdict against the threshold in code | Closes the k-gv-echo hole (answer repeats the stale "10 PM" from the question) without breaking legitimate repeats ("after 9:00 PM, so your 9:30 PM drop qualifies"). DEV re-run: 25/25, 0 verifier rejections | An answer that pairs a correct chunk value with a wrong question value still passes |
+| D68 | `finish_reason == "length"` → `LLMUnavailable("truncated")` → 503; `LLM_MAX_TOKENS` stays **300** | Raise to 500 | Measured on DEV over HTTP: 300 → p95 945 ms, 500 → p95 1784 ms, both 25/25; 0 truncations in 92 real calls at 300. The cap only binds when hit, so the p95 gap is Groq variance, and 500 bought nothing measurable | A long answer (multi-section) could hit the cap → 503; re-check `malformed_outputs` on HELD-OUT in P7 |
+| D69 | `POST /admin/policies` body = `{"markdown": "<file>"}`; `company_id`, `doc_id`, `version` come from the document header; header company must equal the admin's company (403 before any write) | Separate `version`/`doc_id` fields; raw text/markdown body | One source of truth (the document) means no mismatch to reconcile; JSON keeps it schema-validated and needs no raw body read (principal-only scan stays strict) | Callers must JSON-escape the markdown (one `json.dumps`) |
+| D70 | `/ask` 200 and 503 share one shape `{status, answer, citations, company_id, policy_version, request_id}`; other errors use `{status, message, request_id}` | One envelope for everything | A client renders `answer` in every /ask outcome; 401/403/413/422 happen before there is an answer or a company | Two shapes to document |
+| D71 | Deadline: `asyncio.wait_for(answer(...), 2.8 s)`. `answer()` is async and its blocking steps (embedding + Chroma, the Groq call) already run in worker threads. On timeout the coroutine is cancelled and 503 is returned; worker threads finish on their own (Groq's client gives up at 2.2 s) and their results are dropped | Run the whole orchestrator in one `to_thread` | Same guarantee with less nesting; cancellation is immediate | Under sustained slowness, leftover threads occupy the default pool until their own timeouts |
+| D72 | 503 always carries `Retry-After`: 2 s, or Groq's `retry-after` rounded up if larger | No header | Tells clients when to retry without exposing the cause | — |
+| D73 | Pure ASGI middleware for request id + body limits (16 KiB `/ask`, 256 KiB `/admin/*`, declared or streamed) + catch-all 503 | Starlette `BaseHTTPMiddleware`; uvicorn limits | Runs outermost, sees every response (incl. 401/404/413); reads only two headers from the scope (tested) | — |
+| D74 | Retrieval: on Chroma `NotFoundError` (old collection deleted by a concurrent upgrade), re-read the registry once and retry on the new version within the same 0.5 s retrieval budget; otherwise `RetrievalError` → 503 | Always 503 | Turns the documented race window into a correct v2 answer; not an LLM retry | One extra registry read in the rare case |
+| D75 | Eval over HTTP (TestClient) with the app's internal `result_sink` hook (None in normal runs) supplying reason/retrieved sections/llm_calls/causes per request_id; Kestrel v2 ingested through `POST /admin/policies` | Expose `reason` in the API; parse logs | The API stays clean (D60) and the eval still measures internals | The hook is one attribute on `app.state` that production never sets |
+| D76 | Control characters (except tab/newline/CR) in a question are rejected (422), not stripped | Strip silently | Silent changes to a question are surprising; a null byte is never legitimate | — |
+| D77 | `/ask` checks the token before the body: a bad token + bad body is 401, never 422 | Validate body first | Unauthenticated callers learn nothing about input rules | — |
 | D48 | Wording fixes found while drafting cases: Tamarind §3 → "Booking Cut-off", "Regular roster trips must be requested…" (owner decision); Orbitron §7 made an exhaustive list ("…; no other trips count as ad-hoc trips") so airport stays clearly SILENT; `k-nc-medical` replaced by `k-nc-maternity` because Kestrel §6 defines ad-hoc as *any* off-roster trip (a hospital trip is covered); `t-inj-doc` asks "Am I eligible for company cabs?" so a correct refusal can't echo "free cabs anywhere" | Keep the original wording/cases | Each removed a case where a correct answer could be scored wrong | Cases now differ slightly from the plan in §8.3 (updated) |
 
 ---
@@ -338,61 +353,104 @@ The Tamarind injection names "Orbitron Finance" (a company name, not a canary). 
 
 ## 6. API contract
 
-All responses share one shape: `{status, message?, answer?, citations?, company_id?, policy_version?, reason?, request_id}`.
+All examples below are **real responses** from the running container (P6, 2026-11-20, Groq `openai/gpt-oss-20b`, fresh volume: v1 of all three companies seeded, then Kestrel upgraded to v2 live). Tokens are redacted.
+
+**Shapes.**
+- `/ask` (200 answered, 200 not_covered, 503 unavailable): `{status, answer, citations, company_id, policy_version, request_id}`. For `not_covered` and `unavailable`, `answer` is the fixed text from `app/messages.py` and `citations` is `[]`.
+- Every other error (401, 403, 409, 413, 422, 500): `{status, message, request_id}`.
+- Every response carries `X-Request-ID` (the client's value echoed only if it matches `[A-Za-z0-9._-]{1,64}`, else generated). `reason` and failure causes never leave the server (D60).
 
 ### `GET /health`
 ```json
-200 {"status":"ok","ready":true,"llm":"fake","dev_mode":true}
+200 {"status":"ok","ready":true,"llm":"groq","dev_mode":true}        (with .env key)
+200 {"status":"ok","ready":true,"llm":"fake","dev_mode":true}        (fresh copy, no .env)
 ```
 
-### `POST /dev/token` (only when `DEV_MODE=true`; otherwise 404)
+### `POST /dev/token` (only when `DEV_MODE=true`; otherwise 404 `{"detail":"Not Found"}`)
 ```json
 → {"company_id":"kestrel","role":"employee"}
-← 200 {"token":"eyJ...","expires_in":900}
+← 200 {"token":"eyJhbGciOiJI…(redacted)","expires_in":900}
 ```
-Bad company/role/extra field → 422. DEV_MODE off → `404 {"detail":"Not Found"}` (identical to a missing route).
+Bad company/role/extra field → 422.
 
 ### `GET /whoami` (any valid token)
 ```json
 ← 200 {"company_id":"kestrel","role":"employee","subject":"demo-user"}
 ```
-
 Token claims (HS256): `iss, aud, sub, iat, exp, company_id, role`. Leeway 10 s. Default lifetime 900 s.
 
 ### `POST /ask`
-Header `Authorization: Bearer <jwt>`, body `{"question":"After what time do women get a security escort?"}`
-```json
-200 {"status":"answered",
-     "answer":"Women employees get a security escort on drops after 9 PM.",
-     "citations":[{"doc_id":"kestrel-transport-policy","version":2,"section":"4.2",
-                   "section_title":"Night Shift Safety","snippet":"…after 9 PM…"}],
-     "company_id":"kestrel","policy_version":2,"request_id":"…"}
-```
-```json
-200 {"status":"not_covered","reason":"policy_silent",
-     "message":"I couldn't find an answer to this in your company's transport policy. Please contact your transport desk for help.",
-     "company_id":"tamarind","policy_version":1,"request_id":"…"}
-```
-`reason` ∈ `below_threshold | no_active_policy | llm_not_covered | bad_citation | unverified` is **internal**: written to logs and eval records, **not** returned by the API (D60). The two `not_covered` examples above show `reason` for illustration only; P6 removes it from the response body. The message is always the fixed text from `app/messages.py`.
+Header `Authorization: Bearer <jwt>`; body `{"question": "<text>"}` only (`extra=forbid`; stripped; 1–500 chars; control characters other than tab/newline rejected). Body limit 16 KiB.
 
-### `POST /admin/policies` (JWT `role=admin`; company from token)
 ```json
-→ {"doc_id":"kestrel-transport-policy","version":2,"markdown":"# Kestrel …"}
-← 201 {"status":"active","company_id":"kestrel","version":2,"chunks":12}
+→ (kestrel employee, v1 active) {"question":"After what time do women get a security escort on night drops?"}
+← 200 X-Request-ID: 80400fc4237c44f0b1f49eb2ee5b3e2f
+{"status":"answered",
+ "answer":"Women employees receive a security escort on drops departing after 10:00 PM.",
+ "citations":[{"doc_id":"kestrel-transport-policy","version":1,"section_id":"4","section_title":"Night Shift Safety",
+               "snippet":"Women employees are provided a security escort on drops departing after 10:00 PM. Drops departing at or before 10:00 PM do not include a security escort. The escort is a trained guard supplied by…"}],
+ "company_id":"kestrel","policy_version":1,"request_id":"80400fc4237c44f0b1f49eb2ee5b3e2f"}
+
+→ (same question after the live upgrade, X-Request-ID: demo-after-upgrade)
+← 200 X-Request-ID: demo-after-upgrade
+{"status":"answered","answer":"Women employees receive a security escort on drops departing after 9:00 PM.",
+ "citations":[{"doc_id":"kestrel-transport-policy","version":2,"section_id":"4","section_title":"Night Shift Safety","snippet":"Women employees are provided a security escort on drops departing after 9:00 PM. …"}],
+ "company_id":"kestrel","policy_version":2,"request_id":"demo-after-upgrade"}
+
+→ (tamarind employee) {"question":"Can I book a cab on Saturday?"}
+← 200 {"status":"not_covered",
+       "answer":"I couldn't find an answer to this in your company's transport policy. Please contact your transport desk for help.",
+       "citations":[],"company_id":"tamarind","policy_version":1,"request_id":"cb585c088f1947b0af22a412b9e23ed4"}
+
+→ (no Authorization header)            ← 401 WWW-Authenticate: Bearer
+{"status":"auth_error","message":"Your session is invalid or has expired. Please sign in again.","request_id":"e5ecf4ba8e984d5dbf1f1c58da985e1a"}
+→ (last character of the token changed) ← 401, same body (new request_id). Server log: reason=DecodeError: Invalid crypto padding
+
+→ {"question":"escort?","company_id":"orbitron"}   ← 422
+{"status":"bad_request","message":"Please send a question as text, up to 500 characters.","request_id":"e1c863471e4d4250971f7ec05a978e22"}
+   (server log: problems=[('body.company_id', 'extra_forbidden')]; the input is never echoed)
+→ {"question":"   "}                                ← 422, same message
+→ 20 KB body                                        ← 413 {"status":"payload_too_large","message":"The request is too large.","request_id":"d94287979ff2428b9369f765730edf18"}
+
+→ (server started with LLM_TIMEOUT_S=0.01 so the real Groq call fails) ← 503 Retry-After: 2
+{"status":"unavailable","answer":"We couldn't get an answer right now. Please try again in a moment.",
+ "citations":[],"company_id":"kestrel","policy_version":null,"request_id":"1c6791b60c11478cbc6899e54cc15393"}
+   (server log: 503 request_id=1c6791b6… company=kestrel cause=llm:connection: ConnectError)
+```
+
+### `POST /admin/policies` (role `admin`; company from the token; body limit 256 KiB)
+Body `{"markdown": "<the whole policy file>"}` (`extra=forbid`). `company_id`, `doc_id` and `version` come from the document's header (D69).
+```json
+← 201 {"status":"active","company_id":"kestrel","doc_id":"kestrel-transport-policy","version":2,"chunks":10,"previous_version":1,"request_id":"4a63bd24e91f47048100dab5c1f71b18"}
+← 403 (employee token)                 {"status":"forbidden","message":"You don't have permission to do this.","request_id":"39d10f36…"}
+← 403 (kestrel admin, doc says orbitron) {"status":"forbidden","message":"You can only upload policies for your own company. Nothing was changed.","request_id":"6f8d0358…"}
+← 409 (same v2 again)                  {"status":"version_conflict","message":"A newer or equal policy version is already active. Nothing was changed.","request_id":"89abb28c…"}
+← 422 (unparseable document)           {"status":"invalid_policy","message":"The policy document could not be read. Nothing was changed.","request_id":"…"}   (test_admin.py)
+← 500 (failure while staging)          {"status":"ingest_failed","message":"The policy upload failed. The current policy is unchanged.","request_id":"…"}   (test_admin.py)
+← 413 (> 256 KiB)                      {"status":"payload_too_large","message":"The request is too large.","request_id":"…"}   (test_admin.py)
+```
+
+### `GET /admin/policies/status` (role `admin`, own company only)
+```json
+← 200 {"company_id":"kestrel","active_version":2,"doc_id":"kestrel-transport-policy","chunk_count":10,
+       "activated_at":"2026-11-20T10:43:14+00:00",
+       "versions":[{"version":1,"status":"retired"},{"version":2,"status":"active"}],
+       "request_id":"2e2f47e6063c44368d0ae751a9c60310"}
 ```
 
 ### Error codes and exact messages
 
-| HTTP | `status` | When | Exact `message` |
-|---|---|---|---|
-| 200 | `not_covered` | pre-filter, model verdict, invalid citation, unverified number, no active policy | "I couldn't find an answer to this in your company's transport policy. Please contact your transport desk for help." |
-| 503 | `unavailable` | LLM timeout/5xx/429/network, retrieval timeout, malformed model output, isolation assertion | "We couldn't get an answer right now. Please try again in a moment." |
-| 401 | `auth_error` | any token problem (missing, malformed, alg, signature, exp, iss, aud, sub, company, role). Same body for all; reason only in the server log | "Your session is invalid or has expired. Please sign in again." |
-| 403 | `forbidden` | non-admin calls `/admin/policies` | "You don't have permission to do this." |
-| 422 | `bad_request` | empty/whitespace/>500 chars/non-string/non-JSON/extra fields | "Please send a question as text, up to 500 characters." |
-| 409 | `version_conflict` | ingest version ≤ active, or lost CAS race | "A newer or equal policy version is already active. Nothing was changed." |
-| 422 | `invalid_policy` | parse/validation failure | "The policy document could not be read. Nothing was changed." |
-| 500 | `ingest_failed` | failure while staging | "The policy upload failed. The current policy is unchanged." |
+| HTTP | `status` | When | Exact `message` (or `answer` on /ask) | Proven by |
+|---|---|---|---|---|
+| 200 | `not_covered` | pre-filter, model verdict, invalid citation, unverified value, no active policy | "I couldn't find an answer to this in your company's transport policy. Please contact your transport desk for help." | `test_api.py::test_not_covered_shape_hides_reason` |
+| 401 | `auth_error` | any token problem; same body for all; reason only in the log | "Your session is invalid or has expired. Please sign in again." | `test_auth.py` (21 bad tokens), `test_api.py::test_401_same_body_and_checked_before_the_body` |
+| 403 | `forbidden` | non-admin on `/admin/*`; admin uploading another company's document | "You don't have permission to do this." / "You can only upload policies for your own company. Nothing was changed." | `test_admin.py` |
+| 409 | `version_conflict` | version ≤ active, or lost CAS race | "A newer or equal policy version is already active. Nothing was changed." | `test_admin.py::test_same_or_older_version_409_active_unchanged` |
+| 413 | `payload_too_large` | body over 16 KiB (`/ask`) or 256 KiB (`/admin/*`), declared or streamed | "The request is too large." | `test_api.py::test_413_*`, `test_admin.py::test_413_over_admin_limit` |
+| 422 | `bad_request` | empty/whitespace/>500 chars/non-string/non-JSON/wrong content type/control chars/extra fields (incl. `company_id`) | "Please send a question as text, up to 500 characters." (`/ask`); "The request is not valid. Please check it and try again." (other routes) | `test_api.py::test_422_plain_message_no_echo` (15 inputs) |
+| 422 | `invalid_policy` | policy parse/validation failure | "The policy document could not be read. Nothing was changed." | `test_admin.py::test_invalid_document_422` |
+| 500 | `ingest_failed` | failure while staging/validating a new version | "The policy upload failed. The current policy is unchanged." | `test_admin.py::test_ingest_failure_500_says_policy_unchanged` |
+| 503 | `unavailable` | LLM timeout/429/5xx/network/malformed/truncated, retrieval timeout or error, isolation violation, 2.8 s deadline, any unhandled exception | "We couldn't get an answer right now. Please try again in a moment." + `Retry-After` (2 s, or Groq's value rounded up if larger) | `test_api.py::test_503_*` (8 tests) |
 
 ---
 
@@ -400,26 +458,32 @@ Header `Authorization: Bearer <jwt>`, body `{"question":"After what time do wome
 
 | Threat | Defence | Proven by |
 |---|---|---|
-| Weak JWT secret | startup refuses `JWT_SECRET` < 32 chars, and the dev default when `DEV_MODE=false` | `test_health.py::test_short_jwt_secret_rejected`, `::test_dev_default_secret_rejected_when_dev_mode_off` |
-| Forged / `alg=none` / wrong-secret / wrong-audience token | PyJWT with `algorithms=["HS256"]`; required and validated `exp`, `iss`, `aud`, `company_id` | `test_auth.py::test_bad_token_rejected[alg_none / hs512_right_secret / wrong_secret / wrong_aud / wrong_iss / missing_* / company_* / role_*]` (21 cases) |
-| Secrets/tokens in logs | logs carry only `request_id, company_id, status, retrieve_ms, llm_ms` + question truncated to 100 chars; never tokens, secrets, Authorization header | `test_logging.py` (P6, captures log output and asserts no token) |
-| Expired token | `exp` required and checked, 10 s leeway | `test_auth.py::test_bad_token_rejected[expired]`, `::test_small_clock_skew_is_tolerated`, eval `x-auth-malformed` |
-| Auth error tells attacker why | one 401 body for every reason; reason + request_id in log, never the token | `test_auth.py::test_every_auth_failure_has_identical_body`, `::test_reason_logged_but_token_never_logged` |
-| Unknown / look-alike company in token | exact `str` match against allowlist, no normalising | `test_auth.py::test_bad_token_rejected[company_unknown / company_capitalised / company_trailing_space / company_path / company_list / company_int]` |
-| Client overrides company | company only from the Principal; `AskRequest` only has `question`, `extra=forbid` (P6) | `test_principal_only.py` (all routes, runtime + AST); `test_input.py` (P6) |
-| Cross-company retrieval | physically separate collection per company; collection chosen from the Principal via the registry; post-retrieval assertion (company + active version) | `test_store_ingest.py::test_collections_are_physically_separate` (P2); `test_retrieval.py::test_no_foreign_chunk_for_any_company_and_any_question` (3 companies × 67 questions: all 55 eval questions + 12 canary-bait questions), `::test_isolation_assertion_fires_on_forced_bad_chunk[foreign_company / retired_version]`; mapping to 503 in P6 |
-| Old version answering | active pointer + deletion of old collection | `test_store_ingest.py::test_upgrade_flips_and_deletes_old_collection` |
-| Injection in policy text | excerpts tagged as data, `&`/`<`/`>` escaped so text can't close a tag; no tools; strict schema + citation validation + grounding verifier + foreign-company check | `test_prompts.py::test_closing_tags_inside_policy_text_or_question_are_escaped`, `test_ask.py::test_naming_another_company_is_unverified`; eval `injection` (DEV pass with Groq; HELD-OUT in P7) |
+| Weak JWT secret | startup refuses `JWT_SECRET` < 32 chars, and the dev default when `DEV_MODE=false` | `test_health.py`, `test_auth.py::test_refuses_to_start_with_unsafe_secret_when_dev_mode_off` |
+| Forged / `alg=none` / algorithm confusion / wrong secret / wrong audience or issuer | PyJWT `algorithms=["HS256"]`; `exp, iat, iss, aud, sub` required | `test_auth.py::test_bad_token_rejected[...]` (21 cases) |
+| Expired token | `exp` checked, 10 s leeway | `test_auth.py::test_bad_token_rejected[expired]`, `::test_small_clock_skew_is_tolerated`; eval `x-auth-malformed` (401 over HTTP) |
+| Look-alike company in token | exact `str` match against the allowlist | `test_auth.py::test_bad_token_rejected[company_*]` |
+| Auth error tells an attacker why | one 401 body for every reason; reason in the log only | `test_auth.py::test_every_auth_failure_has_identical_body`, `test_api.py::test_401_same_body_and_checked_before_the_body` |
+| Client overrides company | company only from the Principal; `AskRequest` has only `question` (`extra=forbid`) | `test_principal_only.py` (runtime walk of all routes + AST scan, with self-tests), `test_api.py::test_422_plain_message_no_echo[company_in_body]` |
+| Cross-company retrieval | collection per company chosen from the Principal; post-retrieval assertion (company + active version) → 503 | `test_retrieval.py::test_no_foreign_chunk_for_any_company_and_any_question`, `::test_isolation_assertion_fires_on_forced_bad_chunk`, `test_api.py::test_503_forced_isolation_violation` (LLM never called) |
+| Admin of company A ingests for B | company from the admin token; document's `company_id` must match, checked before any write | `test_admin.py::test_admin_of_kestrel_cannot_upload_a_document_claiming_orbitron` |
+| Employee uses admin API | `require_admin` dependency | `test_admin.py::test_employee_cannot_upload_or_read_status` |
+| Old version answering / mixed versions during an upgrade | CAS flip; old collection dropped; readers see v1 or v2 only; a reader whose collection vanished re-reads the registry once | `test_admin.py::test_readers_during_the_flip_see_v1_or_v2_never_a_mix`, `test_retrieval.py::test_collection_dropped_mid_request_retries_once_on_new_version` |
+| Half-updated policy | stage → validate → CAS flip; janitor | `test_store_ingest.py` (failure injection, crash + janitor), `test_admin.py::test_ingest_failure_500_says_policy_unchanged` |
+| Concurrent ingests | per-company lock + UNIQUE + CAS | `test_store_ingest.py::test_concurrent_*` |
+| Injection in policy text | excerpts tagged as data with `&<>` escaped; strict schema; citation validation; grounding verifier; foreign-company check | `test_prompts.py`, `test_ask.py::test_naming_another_company_is_unverified`; eval `injection` (DEV pass with Groq) |
 | Injection in question | same tagging; company not reachable from text | eval `k-inj-q`, `t-trap-claim` |
-| Invented citations | model names labels only; code validates (⊆ given labels, 1–3, ≥1 when answered) and renders from metadata | `test_grounding.py::test_invalid_citations`, `test_ask.py::test_bad_citations_become_not_covered` |
-| Hallucinated values | grounding verifier over cited chunks + question | `test_grounding.py`, `test_ask.py::test_wrong_number_is_unverified`; eval unsupported-claim count (re-checked independently from policy files) |
-| Malformed model output | strict Pydantic parse (known fields, strict types; unknown keys ignored) → `LLMUnavailable` → 503 in P6 | `test_llm.py::test_parse_rejects_malformed`, eval `malformed_outputs` |
-| API key exposure | key only from env (`.env` via compose, gitignored + dockerignored); never in the image, logs, errors or `repr` | `test_llm.py` (key absent from errors and repr); P5 gate: 0 key matches in server logs, repo files, image env |
-| Half-updated policy | stage/validate/CAS flip; janitor | `test_store_ingest.py::test_embedder_fails_mid_add`, `::test_post_validation_fails`, `::test_crash_before_flip_then_janitor_on_restart` |
-| Concurrent ingests | per-company lock + UNIQUE(company, version) + CAS | `test_store_ingest.py::test_concurrent_same_version_one_wins`, `::test_concurrent_without_lock_database_still_guards` |
-| Admin of company A ingests for B | company taken from admin token | `test_ingest_atomic.py::test_cross_company_ingest_forbidden` |
+| Invented citations | labels only; validated; rendered from metadata | `test_grounding.py::test_invalid_citations`, `test_ask.py::test_bad_citations_become_not_covered` |
+| Hallucinated / stale values | verifier over cited chunks + question; question-only values need a chunk-backed value beside them (D67) | `test_grounding.py` (incl. `test_stale_question_value_alone_is_rejected`), `test_ask.py::test_echoing_a_stale_value_from_the_question_is_unverified`; eval unsupported-claim count |
+| Malformed / truncated model output | strict parse; `finish_reason=length` → 503 | `test_llm.py::test_parse_rejects_malformed`, `::test_truncated_completion_is_unavailable` |
+| Internal details in error bodies | fixed messages; 422 never echoes input; catch-all 503; tracebacks only in server log | `test_api.py::test_422_plain_message_no_echo`, `::test_503_*` (no "Traceback"/cause words in body), `::test_503_unhandled_exception_logs_traceback_with_request_id`, `::test_503_from_middleware_catch_all` |
+| Secrets/tokens in logs | logs carry request_id, company, status, reason, timings, question[:100]; never tokens/keys/Authorization | `test_auth.py::test_reason_logged_but_token_never_logged`, `test_ask.py::test_log_line_has_timings_and_truncated_question`; P6 gate: `gsk_` and `eyJ` absent from server logs |
+| Request-ID spoofing / log injection | client id echoed only if `[A-Za-z0-9._-]{1,64}`; used for nothing else | `test_api.py::test_unsafe_client_request_id_is_replaced` (5 cases) |
+| Oversized bodies | 413 on declared or streamed size (16 KiB / 256 KiB) | `test_api.py::test_413_declared_length`, `::test_413_streamed_body_without_length`, `test_admin.py::test_413_over_admin_limit` |
+| Slow dependency hangs a request | retrieval 0.5 s, Groq 2.2 s, overall 2.8 s deadline → 503 | `test_api.py::test_503_slow_retrieval`, `::test_503_overall_deadline` |
+| Budget cross-talk between requests | `CallBudget` created per request | `test_api.py::test_eight_parallel_requests_one_llm_call_each` |
+| API key exposure | key only from env (`.env` via compose; gitignored and dockerignored); never in image, logs, errors, repr | `test_llm.py`; P6 gate: key absent from repo files, eval results, image env, server logs |
 | Committed secrets | `.gitignore` + secret-scan test | `test_no_secrets.py` |
-| Dev token endpoint in prod | default off (404); refuse to start with default or short secret | `test_auth.py::test_dev_token_is_404_when_dev_mode_off`, `::test_refuses_to_start_with_unsafe_secret_when_dev_mode_off` |
+| Dev token endpoint in prod | default off (404); refuse to start with default/short secret | `test_auth.py::test_dev_token_is_404_when_dev_mode_off` |
 
 ---
 
@@ -556,6 +620,9 @@ Rules: iterate on DEV only, at most 3 iterations; HELD-OUT run zero times in P5.
 | A/B | v1+reasoning | adds a `"reasoning"` field before the verdict (ignored on parse) | 23/25 | 0.960 | 1 (unverified) | 1.000 | 0.917 / 1.000 | 0 | 1 | 0 | 0 | 829 / 1374 (max 2341) | `groq_vector_dev_v1-reasoning.jsonl` |
 | 2 | v1 (unchanged) | code only: verifier 12-hour rule (D62) + label stripping (D65) | **25/25** | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 0 | 0 | 0 | 0 | 880 / 1563 | `groq_vector_dev_v1-final.jsonl` |
 
+| 3 | v1 | code: verifier rule 2 (D67) + truncation handling; eval now over HTTP with v2 ingested via the admin API | **25/25** | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 0 | 0 | 0 | 0 | 753 / 945 | `groq_vector_dev_p6-verifier-300.jsonl` |
+| 4 | v1 | `LLM_MAX_TOKENS=500` (token-budget check, D68) | **25/25** | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 0 | 0 | 0 | 0 | 745 / 1784 | `groq_vector_dev_p6-tokens-500.jsonl` |
+
 - **Prompt iterations used: 0 of 3.** v1 scored 25/25 on DEV in both runs, so there was nothing on DEV to iterate against. **v1 is final.**
 - **Reasoning-field A/B: rejected.** It did not improve DEV boundary or near-miss cases (both variants got all of them except the two failures below), and it was slower (max 2341 ms). Failures with it: `k-para-escort` false refusal (verifier bug, fixed in code, §9) and `k-gv-echo` answered "escort … after 10 PM" (echoed the old v1 value from the question; caught by must_include, not by the verifier: D62 trade-off).
 - DEV is now saturated (25/25), so it can't discriminate further; the HELD-OUT measurement in P7 is the honest number.
@@ -580,6 +647,8 @@ Latency includes the query embedding. It varies between runs on this machine (p9
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | fake × vector | all (54 scored; auth skipped) | 54 | 31 | 0.704 | 0 | 0.111 | 0.812 / 0.944 | 0.812 | 0 | 0 | 0 | 0 | 1 | 14 / 23 |
 | groq × vector, v1 | DEV | 25 | 25 | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 1.000 | 0 | 0 | 0 | 0 | 1 | 880 / 1563 (run 2) |
+| groq × vector, v1, HTTP (P6) | DEV | 25 | 25 | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 1.000 | 0 | 0 | 0 | 0 | 1 | 753 / 945 |
+| fake × vector, HTTP (P6) | all (55 incl. auth) | 55 | 32 | 0.709 | 0 | 0.111 | 0.812 / 0.945 | 0.812 | 0 | 0 | 0 | 0 | 1 | 15 / 25 |
 | groq × vector | HELD-OUT | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run |
 
 FakeLLM fails all not-covered traps (16 of 18) as expected: it always answers from S1.
@@ -613,10 +682,13 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 | 2026-11-19 | P2 | Ingesting one 10-section policy took ~2 s; full suite 84 s. Measured: one 7-word query embedding = **490 ms** median in Docker, 442 ms locally | Chroma's MiniLM tokenizer pads every text to 256 tokens (`enable_padding(length=256)`), so each query runs a full 256-token pass. On Mac it also defaults to the CoreML provider | `app/embeddings.py` pads each text to its own length: **26 ms** median in Docker, 5 ms locally, identical vectors (8.6e-8). Suite now 13 s locally, 33 s in Docker (D31) |
 | 2026-11-19 | P2 | First fix attempt (pad to longest in batch) crashed: "inhomogeneous shape" | Chroma tokenizes each text separately, so different lengths can't be stacked | Embed one text per call |
 | 2026-11-19 | P2 | `DefaultEmbeddingFunction` has no `tokenizer` attribute | It wraps `ONNXMiniLM_L6_V2` | Use `ONNXMiniLM_L6_V2` directly |
+| 2026-11-20 | P6 | P5 patches: verifier rule 2 (D67), `finish_reason=length` → 503 (D68). HTTP: `POST /ask` (AskRequest, deadline, 503 mapping, Retry-After), `app/middleware.py` (request id, 413, catch-all), 401/403/409/413/422/500/503 bodies; `POST /admin/policies` + `GET /admin/policies/status`; retrieval NotFound retry (D74); eval over HTTP with admin-API upgrade and auth case. Tests: `test_api.py` (41), `test_admin.py` (13), `test_eval_smoke.py`, + verifier/truncation/retry tests. DEV real runs: 25/25 at 300 and at 500 tokens; kept 300. D67–D77 | **green in Docker**: 415 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM over HTTP); compose without `.env` → `llm:"fake"`, with `.env` → `llm:"groq"` | (to be filled by owner) |
 | 2026-11-20 | P5 | `app/llm.py` (GroqLLM over httpx, FakeLLM + 6 test modes, CallBudget, strict parse), `app/prompts.py` (v1 + reasoning variant), `app/grounding.py` (citations, verifier, foreign-company check, rendering, label strip), `app/ask.py` core `answer()`, `app/schemas.py`, `app/messages.py`, `app/textnorm.py`; eval `--llm fake|groq` through `answer()`; README LLM section. Groq checked live: Llama 404 → gpt-oss-20b. DEV: v1 25/25 twice, reasoning A/B rejected. D57–D66 | **green in Docker**: 348 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM); live Groq test passed when enabled | (to be filled by owner) |
 | 2026-11-20 | P4 | Step 1: +18 eval cases (DEV +11, HELD-OUT +7: multi-section, boundary, leak-bait, Hinglish) → 55; one logged refreeze (§8.5). Step 2: `eval/metrics.py` normaliser + `test_metrics.py` (37). Step 3: `app/retrieval.py` (Retriever interface, 0.5 s timeout, isolation assertion, pre-filter), `Store.query`, `test_retrieval.py` (14), retrieval-only eval runner (hit@1/hit@3/MRR, similarity, margin, latency). Threshold 0.15 from DEV (§8.6). HELD-OUT measured once (§8.4). D49–D56 | **green in Docker**: 253 passed (online and `--network none`), eval exit 0. Local venv not run | (to be filled by owner) |
 | 2026-11-20 | P3 | Docker pytest: 5 failed + 6 errors, `OSError: [Errno 24] Too many open files` | Every `TestClient(app)` start created a new ONNX session and a Chroma client and never closed them; the new auth tests started the app ~30 times | `shared_embedder()` (one model per process), `Store.close()` at shutdown, one module-scoped app in `test_auth.py`, store fixture closes (D45). Then 184 passed in 25 s (faster than P2's 33 s) |
 | 2026-11-20 | P3 | Local `.venv/bin/python` and `cat` hung for minutes | The project is on the iCloud-synced Desktop; macOS had offloaded 181 `.venv` files and 7 small repo files (`find -flags +dataless`), so each read waited for a download | Not a repo bug. Reading the 7 repo files restored them; P3 was verified in Docker only. Local venv not re-run (would need the offloaded files re-downloaded or the folder moved out of iCloud, which is a machine change I haven't made) |
+| 2026-11-20 | P6 | 10 tests in `test_api.py` failed with `'State' object has no attribute 'settings'` after `test_503_from_middleware_catch_all` | pytest's `monkeypatch.setattr` on Starlette's `State` doesn't restore the value on undo (verified in isolation: value gone after undo) | Save/restore `app.state.settings` by hand in that test; other fixtures already assign directly |
+| 2026-11-20 | P6 | Simulated 503 (`LLM_TIMEOUT_S=0.01`) logged `cause=llm:connection: ConnectError`, not `timeout` | With a 10 ms budget httpx failed while connecting and raised `ConnectError` | No change: both map to the same 503; the log shows the real cause |
 | 2026-11-20 | P5 | First Groq probe: `llama-3.1-8b-instant` and `llama-3.3-70b-versatile` → 404 "does not exist or you do not have access" | The free-tier key has no Llama access (docs list them as "contact sales") | Switched the default to `openai/gpt-oss-20b` (D57) |
 | 2026-11-20 | P5 | Probe call to gpt-oss-20b → 400 `json_validate_failed` | `max_tokens=20` in the probe; gpt-oss spends completion tokens on hidden reasoning, so the JSON was cut off | Probe only. The app uses 300 tokens; the 400 is mapped to `LLMUnavailable("http_400: json_validate_failed")` and counted as malformed in the eval (0 in all DEV runs) |
 | 2026-11-20 | P5 | Verifier false refusal on DEV `k-para-escort` (A/B run): unsupported `['21:30']` | Question said "9:30 at night" (no PM) → normalised "9:30"; the model wrote "9:30 PM" → "21:30" | A PM time also matches its 12-hour digits, with the digit-edge guard (D62). Unit tests incl. guards (`09:00` ≠ `9:00`, AM never borrows a PM source). DEV run 2: 25/25 |
@@ -654,6 +726,9 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - Retrieval timeout returns at 0.5 s, but the worker thread keeps running until its search ends (threads can't be cancelled in Python). Under sustained slowness these threads could pile up in the default pool.
 - The pre-filter (0.15) catches only clearly unrelated questions; similarity distributions of answerable and silent near-miss questions overlap (§8.6).
 - The corpus is ~10 sections per company, so hit@3 is near 100% and can't separate vector from hybrid; hit@1 and MRR are the useful numbers.
+- The eval's HTTP path is FastAPI's TestClient (in-process ASGI): it includes routing, middleware, auth and serialisation, but not a real network socket.
+- An admin upload holds one worker thread for ~1 s while it embeds and writes (fine for a few uploads a year).
+- Request-ID, body limits and the deadline are per process; behind a load balancer the proxy should also enforce limits.
 - Answers are always in English, also for Hinglish questions (D59).
 - Groq free tier: 8,000 tokens/minute for gpt-oss-20b ≈ 8 questions per minute for the whole service, and 1,000 requests/day. Beyond that users get "try again" (429 → 503). Fine for a demo; production needs a paid tier.
 - gpt-oss at temperature 0 is not fully deterministic: answers' wording varied between the two v1 DEV runs (verdicts did not).
@@ -679,6 +754,12 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - The sample policies are short only because the brief asked for short fictional ones.
 - Fewer, relevant excerpts also make injection and wrong-section citations less likely, and the isolation check runs over a small, known set.
 - Honest consequence: on this corpus hit@3 is near 100% and can't tell vector from hybrid, so I report hit@1 and MRR too (§8.4).
+
+### HTTP layer (P6) — likely questions
+- *What happens to the worker thread when the 2.8 s deadline fires?* The coroutine is cancelled and we answer 503 at once; the thread keeps running until its own timeout (Groq 2.2 s) and its result is discarded (D71).
+- *Why is `reason` not in the response?* It describes our internals (threshold vs model vs verifier); the user gets the same message either way (D60). The eval reads it through an internal hook (D75).
+- *How do you know readers never see a mixed answer during an upgrade?* `test_readers_during_the_flip_see_v1_or_v2_never_a_mix`: 4 readers during a real flip; every answer's version, citations and text agree; both versions observed.
+- *Why 401 before 422?* So an unauthenticated caller learns nothing about input rules (D77).
 
 ### Likely live changes
 
@@ -730,6 +811,13 @@ docker compose run --rm api python -m eval.run_eval --split dev        # ✔ P4 
 docker compose run --rm api python -m eval.run_eval --split heldout    # ✔ P4 measured once
 docker compose run --rm api python -m eval.run_eval --llm groq --split dev --prompt v1 --tag v1   # ✔ P5 (paced, ~4 min)
 docker compose run --rm -e RUN_GROQ_TESTS=1 api pytest -m groq   # ✔ P5 one real Groq call
+docker compose run --rm api python -m eval.run_eval                    # ✔ P6 over HTTP, FakeLLM, admin-API upgrade
+docker compose run --rm api python -m eval.run_eval --llm groq --split dev --tag p6-verifier-300   # ✔ P6
+docker compose run --rm -e LLM_MAX_TOKENS=500 api python -m eval.run_eval --llm groq --split dev   # ✔ P6 token check
+TOKEN=$(curl -s -X POST localhost:8000/dev/token -H 'content-type: application/json' -d '{"company_id":"kestrel","role":"admin"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+python3 -c 'import json;print(json.dumps({"markdown":open("data/policies/kestrel_v2.md").read()}))' | \
+  curl -s -X POST localhost:8000/admin/policies -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' --data-binary @-   # ✔ P6 live upgrade
+curl -s localhost:8000/admin/policies/status -H "Authorization: Bearer $TOKEN"   # ✔ P6
 # --- Planned ---
 docker compose run --rm api python -m eval.run_eval --llm groq --repeat 3 --split heldout
 docker compose run --rm api python -m eval.run_eval --retrieval hybrid
@@ -770,7 +858,7 @@ bash scripts/demo.sh
 | P4 | MUST | `retrieval.py` (vector), isolation assert, threshold pre-filter, startup warm-up; case-set revision + refreeze; scorer normaliser | `test_retrieval.py`, `test_metrics.py` green; first request not cold ✔ |
 | P5 | MUST | `llm.py` (Fake, Groq, budget, parse), `prompts.py`, citation check, `ask.py` core, eval `--llm` | `test_llm.py`, `test_prompts.py`, `test_ask.py` green ✔; DEV real-LLM run ✔ |
 | P5b | SHOULD | `grounding.py` | `test_grounding.py` green ✔ |
-| P6 | MUST | `ask.py` + error mapping in `main.py` | `test_failures.py`, `test_input.py`, `test_injection.py` green; manual curl works |
+| P6 | MUST | `/ask` HTTP + deadline + error mapping, middleware, admin API + status, live-upgrade readers, eval over HTTP | `test_api.py`, `test_admin.py`, `test_eval_smoke.py` green ✔; curl transcripts ✔ |
 | P7a | MUST | ≥ 10 cases + metrics + runner, FakeLLM | eval runs in container; leaks = 0 |
 | P7b | SHOULD | all 34 cases, freeze HELD-OUT, tune on DEV, Groq run + p95 | §8.4 filled with real numbers |
 | P8 | NICE | hybrid BM25 + RRF; before/after | hybrid rows in §8.4 |
@@ -789,6 +877,29 @@ bash scripts/demo.sh
 | 2026-11-20 | P2 | `store.py` (registry, CAS flip, janitor, warm), `ingest.py` pipeline + seeding, `embeddings.py` (fast MiniLM), `scripts/ingest_cli.py`, startup = janitor → seed → warm. `test_store_ingest.py` (15) + `test_embeddings.py` (1). D31–D39 | **green in Docker**: 88 passed (online and `--network none`), eval exit 0, seeding once, restart no re-seed | (to be filled by owner) |
 | 2026-11-20 | P3 | `auth.py` (Principal, HS256-pinned verify, uniform 401, mint_token), `/dev/token` (404 unless DEV_MODE), `/whoami`, refuse-to-start log line, `scripts/issue_token.py`; `test_auth.py` (47), `test_principal_only.py` (5). Owner decisions applied: Tamarind §3 reworded; D31 comment block + same-embedder tests. Pulled forward from P7: `eval/cases.jsonl` (37), `eval/freeze.py`, `test_eval_cases.py` (40), HELD-OUT frozen (§8.5). Orbitron §7 wording, two case swaps (D48). Fixed fd exhaustion (D45). D40–D48 | **green in Docker**: 184 passed (online and `--network none`), eval exit 0. Local venv not run (§9) | (to be filled by owner) |
 | 2026-11-19/20 | P0 | Skeleton: config, `/health` + warm-up, placeholder modules, secret-scan + health tests, eval stub, Dockerfile, compose, ignore files, `.env.example`, pinned requirements + lock record, README stub. Decisions D25–D30 added. Colima/Docker installed on the machine | **Green in Docker and local venv** (evidence below) | (to be filled by owner) |
+
+#### P6 evidence (real outputs, Docker)
+```
+$ docker compose down -v; docker compose up -d; curl /health   → {"status":"ok","ready":true,"llm":"groq","dev_mode":true} HTTP 200, up->ready 5 s
+  logs: seeded policies: ['kestrel_v1.md', 'tamarind_v1.md', 'orbitron_v1.md']; startup done in 1733 ms
+$ docker compose run --rm api pytest -q            → 415 passed, 1 skipped, 1 warning in 65.07s
+$ docker run --rm --network none <image> pytest -q → 415 passed, 1 skipped, 1 warning in 58.72s
+  per file: admin 13, api 41, ask 26, auth 47, embeddings 3, eval_cases 58, eval_smoke 1, groq_live 1 (skipped), grounding 36,
+            health 3, llm 37, metrics 37, no_secrets 3, policies 68, principal_only 6, prompts 5, retrieval 16, store_ingest 15
+$ docker compose run --rm api python -m eval.run_eval --quiet   (FakeLLM over HTTP)  → eval exit=0
+  upgraded via POST /admin/policies: {'status': 'active', 'company_id': 'kestrel', 'doc_id': 'kestrel-transport-policy', 'version': 2, 'chunks': 10, 'previous_version': 1}
+  {"cases": 55, "pass": 32, "status_accuracy": 0.709, "not_covered_accuracy": 0.111, "auth_cases_correct": 1, "unsupported_claims": 0, "leaks": 0,
+   "malformed_outputs": 0, "unavailable_503": 0, "llm_calls_max": 1, "latency_ms": {"p50": 15.4, "p95": 25.1, "max": 50.4, "n": 54}}
+  FakeLLM run: pipeline check only; quality metrics need --llm groq
+$ eval --llm groq --split dev (300 tokens) → 25/25, p50 753 / p95 945 / max 999 ms, 429: 0, verifier rejections 0
+$ eval --llm groq --split dev (LLM_MAX_TOKENS=500) → 25/25, p50 745 / p95 1784 / max 1944 ms, 429: 0
+$ fresh copy (rsync, no .env, no .git): docker compose -p freshp6 up -d --build; curl /health → {"status":"ok","ready":true,"llm":"fake","dev_mode":true}
+  log: WARNING app No LLM API key set: using FakeLLM (extractive answers, pipeline check only).
+$ project folder (with .env):                   curl /health → {"status":"ok","ready":true,"llm":"groq","dev_mode":true}; log: LLM: groq model=openai/gpt-oss-20b timeout=2.2s
+$ secret grep → exit=1; key value in repo files / eval results → none; image: GROQ_API_KEY in env 0, /app/.env absent
+$ server logs of the transcript run: "gsk_" 0, "eyJ" 0
+```
+curl transcripts: §6 (all real). The first online pytest run's summary line printed blank through `tail -1`; the re-run printed the result above.
 
 #### P5 evidence (real outputs, Docker)
 ```

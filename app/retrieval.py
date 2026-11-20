@@ -16,13 +16,19 @@ NOT_COVERED_MIN_SIM, skip the LLM. It is set LOW on purpose (chosen from DEV dat
 """
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Protocol
 
+from chromadb.errors import NotFoundError
+
 from app.auth import Principal
 from app.config import Settings
 from app.store import ActivePolicy, Store
+
+
+log = logging.getLogger("app.retrieval")
 
 
 class RetrievalError(Exception):
@@ -100,21 +106,40 @@ def assert_isolation(chunks: list[RetrievedChunk], company_id: str, version: int
 
 
 async def retrieve(store: Store, principal: Principal, question: str, settings: Settings) -> RetrievalResult:
+    """One retrieval budget (RETRIEVAL_TIMEOUT_S) covers at most two attempts.
+
+    Upgrade edge (P6): between reading the active pointer and querying, a concurrent upgrade can flip
+    to v2 and delete v1's collection. Chroma then raises NotFoundError. We re-read the registry ONCE
+    and, if the active version changed, search the new collection with the time left. If it did not
+    change, or the retry fails too, it is a RetrievalError ("try again"). This is not an LLM retry.
+    """
     started = time.perf_counter()
+    deadline = started + settings.retrieval_timeout_s
     company_id = principal.company_id                                  # the ONLY source of the company
     retriever = get_retriever(settings.retrieval_mode)
     active = store.active_policy(company_id)
-    if active is None:
-        return RetrievalResult(company_id, None, [], (time.perf_counter() - started) * 1000)
-    try:
-        chunks = await asyncio.wait_for(
-            asyncio.to_thread(retriever.search, store, active, question, settings.retrieval_k),
-            timeout=settings.retrieval_timeout_s,
-        )
-    except asyncio.TimeoutError:
-        raise RetrievalTimeout(f"retrieval exceeded {settings.retrieval_timeout_s}s") from None
-    except Exception as exc:     # e.g. collection dropped by a concurrent upgrade: "try again", never a half answer
-        raise RetrievalError(f"{type(exc).__name__}: {exc}") from exc
+    for attempt in (1, 2):
+        if active is None:
+            return RetrievalResult(company_id, None, [], (time.perf_counter() - started) * 1000)
+        remaining = deadline - time.perf_counter()
+        if remaining <= 0:
+            raise RetrievalTimeout(f"retrieval exceeded {settings.retrieval_timeout_s}s")
+        try:
+            chunks = await asyncio.wait_for(
+                asyncio.to_thread(retriever.search, store, active, question, settings.retrieval_k),
+                timeout=remaining,
+            )
+            break
+        except asyncio.TimeoutError:
+            raise RetrievalTimeout(f"retrieval exceeded {settings.retrieval_timeout_s}s") from None
+        except NotFoundError as exc:
+            fresh = store.active_policy(company_id)
+            if attempt == 2 or fresh is None or fresh.version == active.version:
+                raise RetrievalError(f"collection {active.collection} not found") from exc
+            log.info("retrieval: %s gone (upgraded to v%s); retrying once", active.collection, fresh.version)
+            active = fresh
+        except Exception as exc:     # anything else: "try again", never a half answer
+            raise RetrievalError(f"{type(exc).__name__}: {exc}") from exc
     assert_isolation(chunks, company_id, active.version)
     return RetrievalResult(company_id, active.version, chunks, (time.perf_counter() - started) * 1000)
 

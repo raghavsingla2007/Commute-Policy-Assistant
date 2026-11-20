@@ -121,9 +121,13 @@ class GroqLLM:
         if resp.status_code != 200:
             raise LLMUnavailable(f"http_{resp.status_code}: {_error_code(resp)}")
         try:
-            content = resp.json()["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError):
+            choice = resp.json()["choices"][0]
+            content = choice["message"].get("content")
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
             raise LLMUnavailable("bad_body") from None
+        if choice.get("finish_reason") == "length":
+            # Hit max_completion_tokens (gpt-oss spends part of it on hidden reasoning): the JSON is cut off.
+            raise LLMUnavailable("truncated")
         if not isinstance(content, str) or not content.strip():
             raise LLMUnavailable("empty")
         return strip_code_fences(content)

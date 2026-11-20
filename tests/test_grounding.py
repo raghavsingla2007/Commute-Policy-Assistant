@@ -3,7 +3,7 @@ citation rendering from metadata."""
 
 import pytest
 
-from app.grounding import (CitationError, foreign_companies, render_citations, strip_labels, unsupported_values,
+from app.grounding import (CitationError, check_values, foreign_companies, render_citations, strip_labels, unsupported_values,
                            validate_citations, values_in)
 from app.retrieval import RetrievedChunk
 
@@ -126,3 +126,31 @@ def test_strip_labels():
     assert strip_labels("Women get an escort after 9:00 PM. (S3)") == "Women get an escort after 9:00 PM."
     assert strip_labels("Approval needed [S1, S2] before the trip.") == "Approval needed before the trip."
     assert strip_labels("Section S-block parking is not mentioned.") == "Section S-block parking is not mentioned."
+
+
+# --- P6 rule: a value supported only by the question needs a chunk-supported value beside it ------
+ECHO_Q = "Do I get an escort if my drop leaves after 10 PM?"
+
+
+def test_stale_question_value_alone_is_rejected():
+    """(a) k-gv-echo: the chunk says 9:00 PM; the answer only repeats the question's 10 PM."""
+    assert check_values("Yes, you get an escort for drops after 10 PM.", [ESCORT], ECHO_Q) == \
+        "values only from the question ['22:00']"
+
+
+def test_question_value_with_chunk_value_passes():
+    """(b)"""
+    q = "I'm a woman and my drop leaves at 9:30 PM. Do I get an escort?"
+    assert check_values("Yes, escorts apply after 9:00 PM, so your 9:30 PM drop qualifies.", [ESCORT], q) is None
+
+
+def test_answer_without_numbers_is_unaffected():
+    """(c)"""
+    assert check_values("Yes, guests need prior written approval from HR.", [ESCORT], ECHO_Q) is None
+
+
+def test_check_values_still_rejects_values_from_nowhere():
+    """(d) the earlier rules and guards still hold through check_values."""
+    assert check_values("Escort after 11 PM.", [ESCORT], ECHO_Q) == "unsupported values ['23:00']"
+    assert check_values("Escort after 9:00 PM, not 10:30 PM.", [ESCORT], ECHO_Q) == "unsupported values ['22:30']"
+    assert check_values("Escorts after 9 PM.", [ESCORT], "drop at 9:30 at night?") is None

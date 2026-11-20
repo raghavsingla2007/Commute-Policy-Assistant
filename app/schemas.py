@@ -1,11 +1,39 @@
-"""Pydantic models: the strict LLM output schema and the /ask response shape.
+"""Pydantic models: HTTP request bodies, the strict LLM output schema, and the internal AskResult."""
 
-AskRequest (the HTTP body, extra=forbid) is added in P6 with the route.
-"""
-
+import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
+
+MAX_QUESTION_CHARS = 500
+# C0 control characters and DEL, except tab/newline/carriage return (which are harmless whitespace).
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+class AskRequest(BaseModel):
+    """The ONLY input /ask accepts. No company field: a `company_id` in the body is a 422 (extra=forbid)."""
+
+    model_config = ConfigDict(extra="forbid")
+    question: StrictStr
+
+    @field_validator("question")
+    @classmethod
+    def clean(cls, value: str) -> str:
+        if _CONTROL.search(value):
+            raise ValueError("control characters are not allowed")
+        value = value.strip()
+        if not value:
+            raise ValueError("question is empty")
+        if len(value) > MAX_QUESTION_CHARS:
+            raise ValueError(f"question longer than {MAX_QUESTION_CHARS} characters")
+        return value
+
+
+class AdminPolicyUpload(BaseModel):
+    """POST /admin/policies. company_id, doc_id and version come from the document's own header (D69)."""
+
+    model_config = ConfigDict(extra="forbid")
+    markdown: StrictStr
 
 
 class LLMOutput(BaseModel):

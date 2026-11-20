@@ -172,3 +172,24 @@ def test_parse_accepts_valid_and_ignores_unknown_keys():
 def test_parse_rejects_malformed(raw):
     with pytest.raises(LLMUnavailable, match="malformed_output"):
         parse_llm_output(raw)
+
+
+def test_truncated_completion_is_unavailable():
+    """finish_reason == "length": the model ran out of max_completion_tokens mid-JSON."""
+    body = {"choices": [{"finish_reason": "length", "message": {"content": '{"status": "answered", "answ'}}]}
+    assert failure(groq(lambda r: httpx.Response(200, json=body))).cause == "truncated"
+
+
+def test_truncated_with_empty_content_is_still_truncated():
+    body = {"choices": [{"finish_reason": "length", "message": {"content": ""}}]}
+    assert failure(groq(lambda r: httpx.Response(200, json=body))).cause == "truncated"
+
+
+def test_null_content_is_empty():
+    body = {"choices": [{"finish_reason": "stop", "message": {"content": None}}]}
+    assert failure(groq(lambda r: httpx.Response(200, json=body))).cause == "empty"
+
+
+def test_normal_stop_passes():
+    body = {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(GOOD)}}]}
+    assert json.loads(groq(lambda r: httpx.Response(200, json=body)).complete(PROMPT)) == GOOD

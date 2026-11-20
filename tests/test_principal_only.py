@@ -125,3 +125,15 @@ def test_static_check_catches_planted_violations():
     assert len(raw_request_access(planted)) == 3
     assert raw_request_access("x = resp.headers.get('retry-after')") == []
     assert len(raw_request_access("x = r.headers.get('x-company')")) == 1
+
+
+def test_middleware_reads_only_two_request_headers():
+    """app/middleware.py reads headers from the ASGI scope (not via request.headers), so the AST check above
+    doesn't see it. Pin down exactly which header names it touches."""
+    source = (APP_DIR / "middleware.py").read_text(encoding="utf-8")
+    names = {node.value for node in ast.walk(ast.parse(source))
+             if isinstance(node, ast.Constant) and isinstance(node.value, bytes) and node.value.islower()
+             and node.value.replace(b"-", b"").isalpha()}
+    requested = {n for n in names if n in {b"x-request-id", b"content-length"} or b"company" in n or b"auth" in n}
+    assert requested == {b"x-request-id", b"content-length"}
+    assert "authorization" not in source.lower().replace("never reads the body's content or authorization", "")

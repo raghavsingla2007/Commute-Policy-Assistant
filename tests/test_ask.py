@@ -186,3 +186,10 @@ def test_log_line_has_timings_and_truncated_question(store, caplog):
     [line] = [r.getMessage() for r in caplog.records if r.name == "app.ask"]
     assert "retrieve_ms=" in line and "llm_ms=" in line and "status=answered" in line
     assert long_q[:400] not in line and long_q[:100].strip() in line
+
+
+def test_echoing_a_stale_value_from_the_question_is_unverified(store):
+    llm = Scripted({"status": "answered", "answer": "Yes, you get an escort for a drop after 10 PM.", "citations": ["S1"]})
+    res = ask(store, llm, "Do I get an escort if my drop leaves after 10 PM?")
+    assert_not_covered(res, "unverified")
+    assert "only from the question" in res.detail

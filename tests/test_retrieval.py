@@ -167,3 +167,37 @@ def test_prefilter(store, settings):
 
 def test_default_threshold_is_low(settings):
     assert 0.0 < settings.not_covered_min_sim <= 0.3   # pre-filter only; the LLM verdict is the gate (D9)
+
+
+# --- P6: upgrade edge — the old collection is deleted between reading the pointer and searching ------
+def test_collection_dropped_mid_request_retries_once_on_new_version(tmp_path, settings, caplog):
+    s = Store(tmp_path / "data", shared_embedder())
+    try:
+        ingest_policy(s, "kestrel", (POLICIES / "kestrel_v1.md").read_text(encoding="utf-8"))
+        stale = s.active_policy("kestrel")                       # what a reader saw just before the flip
+        ingest_policy(s, "kestrel", (POLICIES / "kestrel_v2.md").read_text(encoding="utf-8"))  # v1 dropped
+        real, calls = s.active_policy, []
+
+        def first_stale(company_id):
+            calls.append(company_id)
+            return stale if len(calls) == 1 else real(company_id)
+
+        s.active_policy = first_stale
+        with caplog.at_level("INFO", logger="app.retrieval"):
+            result = run(retrieve(s, who("kestrel"), "security escort night drops", settings))
+        assert result.version == 2 and {c.version for c in result.chunks} == {2}
+        assert len(calls) == 2                                   # registry re-read exactly once
+        assert "pol_kestrel_v1 gone (upgraded to v2); retrying once" in caplog.text
+    finally:
+        s.close()
+
+
+def test_collection_missing_without_upgrade_is_an_error(tmp_path, settings):
+    s = Store(tmp_path / "data", shared_embedder())
+    try:
+        ingest_policy(s, "kestrel", (POLICIES / "kestrel_v1.md").read_text(encoding="utf-8"))
+        s.drop_collection("pol_kestrel_v1")                      # broken state: pointer says v1, data gone
+        with pytest.raises(RetrievalError, match="not found"):
+            run(retrieve(s, who("kestrel"), "escort", settings))
+    finally:
+        s.close()
