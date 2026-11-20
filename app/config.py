@@ -84,7 +84,7 @@ def load_settings() -> Settings:
         policies_dir=Path(env("POLICIES_DIR", str(PROJECT_ROOT / "data" / "policies"))),
         retrieval_k=int(env("RETRIEVAL_K", "3")),
         retrieval_mode=env("RETRIEVAL_MODE", "vector").strip().lower(),
-        not_covered_min_sim=float(env("NOT_COVERED_MIN_SIM", "0.20")),
+        not_covered_min_sim=float(env("NOT_COVERED_MIN_SIM", "0.15")),  # chosen on DEV, PROJECT_LOG §8.6
         retrieval_timeout_s=float(env("RETRIEVAL_TIMEOUT_S", "0.5")),
         request_timeout_s=float(env("REQUEST_TIMEOUT_S", "2.8")),
         max_question_chars=int(env("MAX_QUESTION_CHARS", "500")),

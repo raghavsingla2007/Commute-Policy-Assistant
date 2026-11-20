@@ -108,11 +108,11 @@ GROUND_TRUTH = [
 
 # Silent topics: no section may mention these words (the eval's not_covered cases depend on it).
 SILENT = [
-    ("tamarind_v1.md", ["weekend", "saturday", "sunday", "monday", "friday", "weekday"]),
+    ("tamarind_v1.md", ["weekend", "saturday", "sunday", "monday", "friday", "weekday", "wi-fi", "wifi"]),
     ("orbitron_v1.md", ["airport", "cancellation fee", "cancelled"]),
     ("kestrel_v1.md", ["holiday", "pet", "medical", "hospital", "pregnan", "maternity"]),
     ("kestrel_v2.md", ["holiday", "pet", "dog", "medical", "hospital", "pregnan", "maternity", "reimburse"]),
-    ("orbitron_v1.md", ["parking"]),
+    ("orbitron_v1.md", ["parking", "hospital", "medical"]),
     ("tamarind_v1.md", ["address change", "change their pickup", "pickup address"]),
 ]
 

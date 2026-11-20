@@ -9,6 +9,7 @@ import pytest
 from app.config import KNOWN_COMPANIES
 from app.ingest import parse_policy
 from eval.freeze import CASES, heldout_sha256, load_cases, split_of
+from eval.metrics import contains
 
 ROOT = Path(__file__).resolve().parent.parent
 FIELDS = ["id", "input", "expected", "actual", "pass", "notes"]
@@ -25,8 +26,8 @@ def sections_of(company: str) -> dict[str, str]:
 
 
 def test_shape_and_counts():
-    assert len(CASES_LIST) == 37
-    assert len({c["id"] for c in CASES_LIST}) == 37
+    assert len(CASES_LIST) == 55
+    assert len({c["id"] for c in CASES_LIST}) == 55
     for c in CASES_LIST:
         assert list(c) == FIELDS, c["id"]
         assert set(c["input"]) <= {"company", "question", "auth"} and c["input"]["company"] in KNOWN_COMPANIES
@@ -34,25 +35,30 @@ def test_shape_and_counts():
         assert c["actual"] is None and c["pass"] is False
         assert re.match(r"^category=[a-z_]+(,[a-z_]+)*; split=(dev|heldout);", c["notes"]), c["id"]
         assert set(c["expected"]["status"]) <= STATUSES
+        assert set(c["expected"]) <= {"status", "sections", "must_include", "must_not_include",
+                                      "http_status", "all_sections"}
+        if c["expected"].get("all_sections"):
+            assert 2 <= len(c["expected"]["sections"]) <= 3, c["id"]     # citations cap is 3
     splits = [split_of(c) for c in CASES_LIST]
-    assert (splits.count("dev"), splits.count("heldout")) == (14, 23)
+    assert (splits.count("dev"), splits.count("heldout")) == (25, 30)
 
 
 @pytest.mark.parametrize("case", CASES_LIST, ids=lambda c: c["id"])
 def test_expected_values_come_from_the_policy_text(case):
     """Each must_include group has an alternative that is literally in an expected section, and no
-    must_not_include phrase is in those sections. So expectations trace back to the ground truth."""
+    must_not_include phrase is in those sections. So expectations trace back to the ground truth.
+    Matching uses the scorer's own normalisation (eval.metrics.contains), so "9 PM" == "9:00 PM"."""
     exp = case["expected"]
     if exp["status"] == ["not_covered"] or exp["status"] == ["auth_error"]:
         assert exp["sections"] == [] and exp["must_include"] == []
         return
     secs = sections_of(case["input"]["company"])
     assert exp["sections"] and set(exp["sections"]) <= set(secs), case["id"]
-    text = " ".join(secs[s] for s in exp["sections"]).lower()
+    text = " ".join(secs[s] for s in exp["sections"])
     for group in exp["must_include"]:
-        assert any(alt.lower() in text for alt in group), (case["id"], group)
+        assert any(contains(text, alt) for alt in group), (case["id"], group)
     for phrase in exp["must_not_include"]:
-        assert phrase.lower() not in text, (case["id"], phrase)
+        assert not contains(text, phrase), (case["id"], phrase)
 
 
 def frozen_hashes() -> list[str]:

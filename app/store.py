@@ -186,12 +186,9 @@ class Store:
     def collection_names(self) -> list[str]:
         return [c.name for c in self.chroma.list_collections()]
 
-    def search_active(self, company_id: str, text: str, k: int) -> list[dict]:
-        """Top-k chunks from the company's ACTIVE collection only. Retrieval logic builds on this in P4."""
-        active = self.active_policy(company_id)
-        if active is None:
-            return []
-        col = self.get_collection(active.collection)
+    def query(self, collection: str, text: str, k: int) -> list[dict]:
+        """Top-k chunks of ONE named collection: {id, text, metadata, distance} (cosine distance)."""
+        col = self.get_collection(collection)
         res = col.query(
             query_embeddings=self.embedder([text]), n_results=k,
             include=["documents", "metadatas", "distances"],
@@ -200,6 +197,11 @@ class Store:
             {"id": i, "text": d, "metadata": m, "distance": dist}
             for i, d, m, dist in zip(res["ids"][0], res["documents"][0], res["metadatas"][0], res["distances"][0])
         ]
+
+    def search_active(self, company_id: str, text: str, k: int) -> list[dict]:
+        """Top-k chunks from the company's ACTIVE collection (used by ingest tests; the API uses retrieval.py)."""
+        active = self.active_policy(company_id)
+        return [] if active is None else self.query(active.collection, text, k)
 
     # ---------- Startup ----------
     def janitor(self) -> dict:
