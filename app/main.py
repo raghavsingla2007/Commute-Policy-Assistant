@@ -14,6 +14,7 @@ from app.auth import AuthError, Principal, mint_token, require_principal
 from app.config import load_settings
 from app.embeddings import shared_embedder
 from app.ingest import seed_if_empty
+from app.llm import build_llm
 from app.store import Store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -56,6 +57,9 @@ async def lifespan(app: FastAPI):
         log.warning("=" * 70)
     if settings.llm_mode == "fake":
         log.warning("No LLM API key set: using FakeLLM (extractive answers, pipeline check only).")
+    else:
+        log.info("LLM: %s model=%s timeout=%.1fs", settings.llm_mode, settings.llm_model, settings.llm_timeout_s)
+    app.state.llm = build_llm(settings)
     try:
         start_store(app)
     except Exception:  # keep serving; /health reports not ready
@@ -65,6 +69,9 @@ async def lifespan(app: FastAPI):
     if store is not None:
         store.close()
         app.state.store = None
+    close = getattr(app.state.llm, "close", None)
+    if close is not None:
+        close()
 
 
 app = FastAPI(title="Commute Policy Assistant", lifespan=lifespan)

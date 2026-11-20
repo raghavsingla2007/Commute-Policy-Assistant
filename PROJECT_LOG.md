@@ -26,8 +26,8 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 | # | Requirement | Tier | Implemented in (file) | Verified by | Status |
 |---|---|---|---|---|---|
 | R1 | Python, FastAPI, Chroma, embedding model, LLM, JWT | MUST | `requirements.txt`, `app/*` | P0 gate | partial (P0): FastAPI + Chroma + MiniLM installed and running; JWT/LLM in P3/P5 |
-| R2 | Free LLM only, no spend | MUST | `app/llm.py`, `app/config.py` | README / `.env.example` | partial (P0): config + FakeLLM fallback mode; clients in P5 |
-| R3 | Tests use fake LLM; quota error never fails a test | MUST | `app/llm.py` (FakeLLM), `tests/conftest.py` | whole suite runs with no key | partial (P0): conftest forces `LLM_PROVIDER=fake`, removes keys |
+| R2 | Free LLM only, no spend | MUST | `app/llm.py`, `app/config.py` | README / `.env.example`; §3.5 | done (P5): Groq free tier, `openai/gpt-oss-20b`; FakeLLM without a key |
+| R3 | Tests use fake LLM; quota error never fails a test | MUST | `app/llm.py` (FakeLLM), `tests/conftest.py` | whole suite runs with no key and `--network none`; real-Groq test marked `groq`, skipped by default | done (P5) |
 | R4 | Build all mocks (policy store, JWT issuer) | MUST | `app/store.py`, `app/auth.py`, `scripts/issue_token.py` | `test_store_ingest.py`, `test_auth.py` (P3) | done (P3): policy store (P2) + JWT issuer (`mint_token`, `/dev/token`, `scripts/issue_token.py`) |
 | R5 | Never commit API keys | MUST | `.gitignore`, `.dockerignore`, `.env.example` | `test_no_secrets.py` (3 tests) | done (P0) |
 | R6 | Explain/change every line | MUST | small flat modules | viva | ongoing |
@@ -35,12 +35,12 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 | R8 | Ingest policy + new version; only active answers | MUST | `app/ingest.py`, `app/store.py` | `test_store_ingest.py::test_upgrade_flips_and_deletes_old_collection`; eval `post_version` (P7) | done at storage level (P2); `/ask` path in P6 |
 | R9 | Failed ingestion never half-updates | MUST | `app/ingest.py` (stage→validate→CAS flip), `app/store.py` (janitor) | `test_store_ingest.py` (mid-add failure, post-validation failure, crash before flip + janitor, retry, concurrency) | done (P2) |
 | R10 | Question API behind JWT with company; server-side filter, no override | MUST | `app/auth.py`, `app/retrieval.py`, `app/schemas.py` | `test_store_ingest.py::test_collections_are_physically_separate`, `test_auth.py` (47), `test_principal_only.py` (5), `test_retrieval.py::test_no_foreign_chunk_for_any_company_and_any_question`, `::test_isolation_assertion_fires_on_forced_bad_chunk` | partial (P4): storage isolation (P2), JWT + principal-only rule (P3), retrieval from the principal's active collection + isolation assertion + 3×(all eval questions + canary bait) isolation test (P4); `/ask` in P6 |
-| R11 | Grounded answers citing document + section | MUST | `app/ask.py`, `app/schemas.py` | `test_citations.py`, eval citation metric | planned |
-| R12 | Explicit "not covered" → plain message pointing to desk | MUST | `app/ask.py`, `app/messages.py` | `test_not_covered.py`, eval `not_covered` cases | planned |
-| R13 | No obedience to instructions in docs or question | MUST | `app/prompts.py` + structural guards | `test_injection.py`, eval `injection` | planned |
+| R11 | Grounded answers citing document + section | MUST | `app/ask.py`, `app/grounding.py`, `app/schemas.py` | `test_grounding.py`, `test_ask.py`; eval citation metric (DEV 1.000 with Groq) | done in-process (P5); HTTP in P6 |
+| R12 | Explicit "not covered" → plain message pointing to desk | MUST | `app/ask.py`, `app/messages.py` | `test_ask.py::test_llm_not_covered_uses_fixed_message_not_model_text`, eval not-covered cases (DEV 11/11 with Groq) | done in-process (P5) |
+| R13 | No obedience to instructions in docs or question | MUST | `app/prompts.py` + structural guards (escaping, schema, citations, verifier, foreign-company check) | `test_prompts.py`, `test_ask.py`, eval `injection` (DEV t-inj-doc, k-inj-q pass with Groq) | partial (P5): HELD-OUT injection cases measured in P7 |
 | R14 | Slow retrieval / LLM failure → "try again", no hang/half answer | MUST | `app/retrieval.py` (0.5 s `wait_for`), `app/ask.py`, `app/llm.py` | `test_retrieval.py::test_slow_search_times_out_at_configured_limit`, `::test_search_failure_becomes_retrieval_error`; `test_failures.py` (P6) | partial (P4): retrieval raises RetrievalTimeout/RetrievalError; mapping to 503 in P6 |
 | R15 | p95 ≤ 3 s incl. LLM | SHOULD | timeouts in `app/config.py`, warm-up in `app/main.py` | `eval/run_eval.py --llm groq` | planned |
-| R16 | ≤ 2 LLM calls per question | MUST | `app/llm.py` (call budget) | `test_budget.py` | planned |
+| R16 | ≤ 2 LLM calls per question | MUST | `app/llm.py` (`CallBudget`), `app/ask.py` | `test_llm.py::test_budget_allows_two_and_raises_on_third`, `test_ask.py::test_exactly_one_llm_call…`, eval `llm_calls_max` = 1 | done (P5) |
 | R17 | ≤ 3 cited chunks per answer; README says how | MUST | `app/retrieval.py` (k from config, validated 1–3), `app/schemas.py` | `test_retrieval.py::test_k_comes_from_config`; `test_budget.py` (P5) | partial (P4): retrieval never returns more than k ≤ 3 |
 | R18 | ≥ 10 verified questions incl. paraphrase, cross-company, not-covered | MUST (10) / SHOULD (37) | `eval/cases.jsonl` | `test_eval_cases.py` (shape, expectations traced to policy text); eval run (P7) | partial (P4): 55 cases (DEV 25 / HELD-OUT 30), refrozen once before tuning; retrieval-only run done (§8.4), answer scoring P7 |
 | R19 | JSONL fields exactly `id,input,expected,actual,pass,notes` | MUST | `eval/run_eval.py` | `test_eval_smoke.py` (schema check) | partial (P0): stub writes the 6 exact fields; smoke test in P7a |
@@ -56,7 +56,7 @@ Tiers: **MUST** = 10-minute gate / core behaviour · **SHOULD** = full review qu
 
 | # | Requirement | Tier | Implemented in | Verified by | Status |
 |---|---|---|---|---|---|
-| A1 | Grounding verifier: every number/time/₹/duration in answer must appear in cited chunks (or the question) | SHOULD | `app/grounding.py` | `test_grounding.py`, eval `grounding` cases, unsupported-claim metric | planned |
+| A1 | Grounding verifier: every number/time/₹/duration in answer must appear in cited chunks (or the question); answer naming another company is unverified | SHOULD | `app/grounding.py`, `app/textnorm.py` | `test_grounding.py` (incl. false-positive guards), eval unsupported-claim count (independent re-check from policy files) | done (P5) |
 | A2 | LLM verdict is the primary not-covered gate; threshold is a cheap pre-filter | MUST | `app/retrieval.py` (`passes_prefilter`), `app/ask.py`, `app/config.py` | §8.6 DEV distribution; eval near-miss traps (P7) | partial (P4): threshold 0.15 chosen on DEV; LLM gate in P5 |
 | A3 | DEV / HELD-OUT eval split; tune only on DEV | SHOULD | `eval/cases.jsonl` (`split` in notes) | §8 reports both | planned |
 | A4 | Warm embedder + Chroma at startup | SHOULD | `app/main.py` (lifespan `warm_up`) | `test_health.py`; first-request latency in eval (P7) | done: model warm-up (P0) + one query per active collection (P2, `Store.warm`); startup incl. seeding 2423 ms, restart 473 ms in Docker |
@@ -83,15 +83,16 @@ app/
   config.py      every tunable from env + KNOWN_COMPANIES allowlist + POLICIES_DIR
   embeddings.py  MiniLM ONNX embedder padded per text (same vectors as Chroma's, ~20x faster per query); one per process
   auth.py        Principal, verify_token (HS256 pinned), require_principal dependency, mint_token (mock issuer)
-  schemas.py     Pydantic: AskRequest (extra=forbid), AskResponse, Citation, LLMOutput, IngestRequest
+  schemas.py     Pydantic: LLMOutput (strict, unknown keys ignored), Citation, AskResult (AskRequest in P6)
   ask.py         the /ask pipeline orchestrator — the one file to read to understand a request
   retrieval.py   Retriever interface (vector now, hybrid P8), 0.5 s timeout, isolation assertion, pre-filter
-  llm.py         LLM protocol, GroqLLM / GeminiLLM (httpx), FakeLLM, per-request call budget
+  llm.py         LLM protocol, GroqLLM (httpx), FakeLLM (+ test modes), CallBudget, parse_llm_output
   prompts.py     system prompt + excerpt builder (S1..S3 labels, tag escaping)
-  grounding.py   extract numbers/times/₹/durations; check they appear in cited chunks
+  grounding.py   citation validation, number/time/₹ verifier, foreign-company check, citation rendering
   ingest.py      markdown → section chunks; stage → validate → CAS flip → cleanup; per-company lock
   store.py       SQLite registry, Chroma client, startup janitor
   messages.py    fixed user-facing strings (never generated by the model)
+  textnorm.py    normalise()/contains(): shared by the verifier and the eval scorer
 data/policies/   kestrel_v1.md  kestrel_v2.md  tamarind_v1.md  orbitron_v1.md
 eval/
   cases.jsonl    37 cases (DEV 14 / HELD-OUT 23); actual=null, pass=false until the runner fills them
@@ -111,6 +112,11 @@ tests/
   test_eval_cases.py eval set shape, expectations traced to policy text, HELD-OUT freeze
   test_metrics.py    P4: scorer normaliser (equivalents + false-positive guards), ranks, percentiles
   test_retrieval.py  P4: top-k from active version, isolation sweep, forced bad chunk, timeout, pre-filter
+  test_llm.py        P5: GroqLLM via httpx.MockTransport (success, 429, 500, timeout, bad bodies, fences), FakeLLM, budget, strict parse
+  test_prompts.py    P5: labels, tag escaping, caps, rules in the system prompt
+  test_grounding.py  P5: citations, verifier + guards, foreign companies, rendering, label stripping
+  test_ask.py        P5: orchestrator end to end with scripted/fake LLMs, every outcome
+  test_groq_live.py  P5: one real Groq call (marked `groq`, skipped by default)
   test_no_secrets.py working-tree secret scan + planted-key self-test + .env ignored check
   (more per phase)
 docs/EVAL_REPORT.md
@@ -132,8 +138,12 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | pytest | 9.2.0 | PyPI (2026-10-27) | latest |
 | Chroma default embedder | `chromadb.utils.embedding_functions.DefaultEmbeddingFunction` → ONNX all-MiniLM-L6-v2 | docs.trychroma.com + installed source | cache: `~/.cache/chroma/onnx_models/all-MiniLM-L6-v2` (read from `ONNXMiniLM_L6_V2.DOWNLOAD_PATH`) |
 | Chroma client | `chromadb.PersistentClient(path, settings=Settings(anonymized_telemetry=False))` | installed 1.5.9 signature + `Settings` fields | |
-| Groq models | `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, `openai/gpt-oss-20b`, `openai/gpt-oss-120b` listed as production | console.groq.com/docs/models | Page shows Llama models with "contact sales" pricing and **no free-tier limits**; confirm free-tier access with a real key in P5 before fixing the default `LLM_MODEL` |
-| Gemini fallback model ID | not checked yet | — | check in P5 |
+| Groq models (2026-11-19) | `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, `openai/gpt-oss-20b`, `openai/gpt-oss-120b` listed as production | console.groq.com/docs/models | Llama shows "contact sales"; superseded by the 2026-11-20 check below |
+| Groq models (2026-11-20, P5) | docs: production = `llama-3.1-8b-instant`, `llama-3.3-70b-versatile`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`; preview incl. `qwen/qwen3.8-27b`. **With this key** `GET /models` lists `openai/gpt-oss-20b`, `openai/gpt-oss-120b`, `qwen/qwen3.8-27b` (+ guard models); both Llama IDs return **404** "does not exist or you do not have access" | console.groq.com/docs/models; live `GET /openai/v1/models` and one chat call each (run inside the container; key never printed) | **Default `LLM_MODEL=openai/gpt-oss-20b`** (D57) |
+| Groq free-tier limits (2026-11-20) | gpt-oss-20b, gpt-oss-120b and qwen3.8-27b each returned `x-ratelimit-limit-requests: 1000` (per day) and `x-ratelimit-limit-tokens: 8000` (per minute) | response headers (docs page shows Developer-plan base limits only: 30 RPM, 1K RPD, 8K TPM, 200K TPD for gpt-oss) | ~850 tokens per question → about 8 questions/minute; eval paces at 8 s |
+| Groq reasoning params (2026-11-20) | gpt-oss: `reasoning_effort` low/medium/high; `reasoning_format` not supported; `include_reasoning` true/false; JSON mode supported | console.groq.com/docs/reasoning | we send `reasoning_effort=low`, `include_reasoning=false`; reasoning tokens count toward `max_completion_tokens` (probe: 45–64 of 95–133 completion tokens) |
+| Probe latency (2026-11-20, 3 calls each, ~700-token prompt) | gpt-oss-20b median 964 ms; gpt-oss-120b 1097 ms; qwen3.8-27b (`reasoning_effort=none`) 594 ms | live calls | qwen is faster but preview ("may be discontinued"); 20b chosen |
+| Gemini | not implemented (owner decision P5); documented swap point in README | — | — |
 
 `requirements.txt` = direct pins (what Docker installs). `requirements.lock.txt` = full `pip freeze` of the verified macOS venv, kept as a reference record (not used by Docker, because some resolved wheels are platform-specific).
 
@@ -254,6 +264,16 @@ docker-compose.yml   one service, named volume /data, DEV_MODE on, .env optional
 | D54 | Multi-section cases (`all_sections: true`): a hit at k needs *all* expected sections in the top k; rank = position of the last one | Any one section is enough | The question needs both rules to be answered | Stricter than single-section scoring; lowers HELD-OUT hit@3 (2 misses) |
 | D55 | P4 eval runs retrieval only (no `/ask` yet): `pass` = expected section(s) in top 3 and not pre-filtered (answerable) or zero foreign chunks (others); auth case skipped; files `retrieval-only_*.jsonl` | Wait for P7 to evaluate anything | Lets the threshold be chosen from data now, before any LLM work | `pass` here is not answer correctness |
 | D56 | DEV share is 45% (25/55), not ≈ 40% | Exactly 40% | The owner asked for ≥ 10 DEV tuning cases + 1 DEV Hinglish (11) on top of 14, against 7 new HELD-OUT; 40% would have needed fewer DEV cases than requested | — |
+| D57 | Default model `openai/gpt-oss-20b`, `reasoning_effort=low`, `include_reasoning=false`, JSON mode, temperature 0, `max_completion_tokens=300` (`LLM_MAX_TOKENS`) | `llama-3.1-8b-instant` (planned); gpt-oss-120b; qwen3.8-27b | Llama returns 404 with this free-tier key (§3.5). 20b is production-tier, ~1 s, answered the boundary probe correctly. Qwen was faster but is preview | gpt-oss reasons internally: those tokens count toward the 300 budget and add latency |
+| D58 | `LLMOutput`: known fields required with strict types (`status` ∈ answered/not_covered, `answer` str, `citations` list[str]); unknown keys ignored | Reject unknown keys | Owner decision; lets a model add harmless fields (e.g. "reasoning") without failing. Malformed outputs are counted in the eval | — |
+| D59 | Answers are always in English, also for Hinglish questions | Answer in the question's language | Owner decision; the grounding verifier and scorer work on English text | Limitation for Hinglish users (§10) |
+| D60 | `reason` is internal: in logs and eval records, not in the API response (P6) | Return `reason` to clients | It reveals pipeline internals (threshold vs model vs verifier) and helps no user; the message is identical anyway | Clients can't tell why; request_id links to the log |
+| D61 | Gemini not implemented; `LLM` protocol (`complete(prompt) -> str`) is the swap point, described in README | Implement both | Owner decision: one provider is less to explain | Groq outage = "try again" until the swap is built |
+| D62 | Verifier sources = cited chunks' text + the question. A PM time also matches its 12-hour digits ("21:30" ↔ "9:30") with the digit-edge guard | Chunks only; all retrieved chunks | Uncited chunks don't count (the model must cite what it uses); the question lets users' own values be repeated. The 12-hour rule fixed a false refusal found on DEV (§9) | An answer can echo a wrong value from the question (k-gv-echo) |
+| D63 | Foreign-company check: an answered text naming another allowlisted company is `unverified` | Rely on isolation only | Retrieval can't return other companies' chunks, so naming one means the model drew on the question or its own knowledge | A harmless mention ("unlike Orbitron…") is refused |
+| D64 | Normaliser moved to `app/textnorm.py`; `eval/metrics.py` imports it | Keep in eval/ | Verifier and scorer must use identical matching rules; app code shouldn't import from eval/ | — |
+| D65 | Stray labels like "(S3)" are stripped from the answer text (code, after verification) | Prompt rule; leave them | Seen in a DEV answer; citations are shown separately; deterministic | — |
+| D66 | Eval P5: in-process through `answer()`, own store, `--min-interval 8` s between Groq calls (8K TPM), one runner-level retry after `Retry-After` on 429 | Hit the HTTP server | P6 switches to TestClient; pacing keeps the run inside the free tier | Excludes HTTP overhead until P6 |
 | D48 | Wording fixes found while drafting cases: Tamarind §3 → "Booking Cut-off", "Regular roster trips must be requested…" (owner decision); Orbitron §7 made an exhaustive list ("…; no other trips count as ad-hoc trips") so airport stays clearly SILENT; `k-nc-medical` replaced by `k-nc-maternity` because Kestrel §6 defines ad-hoc as *any* off-roster trip (a hospital trip is covered); `t-inj-doc` asks "Am I eligible for company cabs?" so a correct refusal can't echo "free cabs anywhere" | Keep the original wording/cases | Each removed a case where a correct answer could be scored wrong | Cases now differ slightly from the plan in §8.3 (updated) |
 
 ---
@@ -353,7 +373,7 @@ Header `Authorization: Bearer <jwt>`, body `{"question":"After what time do wome
      "message":"I couldn't find an answer to this in your company's transport policy. Please contact your transport desk for help.",
      "company_id":"tamarind","policy_version":1,"request_id":"…"}
 ```
-`reason` ∈ `low_relevance | policy_silent | invalid_citation | unverified | no_active_policy` (for logs/eval; the message is identical).
+`reason` ∈ `below_threshold | no_active_policy | llm_not_covered | bad_citation | unverified` is **internal**: written to logs and eval records, **not** returned by the API (D60). The two `not_covered` examples above show `reason` for illustration only; P6 removes it from the response body. The message is always the fixed text from `app/messages.py`.
 
 ### `POST /admin/policies` (JWT `role=admin`; company from token)
 ```json
@@ -389,11 +409,12 @@ Header `Authorization: Bearer <jwt>`, body `{"question":"After what time do wome
 | Client overrides company | company only from the Principal; `AskRequest` only has `question`, `extra=forbid` (P6) | `test_principal_only.py` (all routes, runtime + AST); `test_input.py` (P6) |
 | Cross-company retrieval | physically separate collection per company; collection chosen from the Principal via the registry; post-retrieval assertion (company + active version) | `test_store_ingest.py::test_collections_are_physically_separate` (P2); `test_retrieval.py::test_no_foreign_chunk_for_any_company_and_any_question` (3 companies × 67 questions: all 55 eval questions + 12 canary-bait questions), `::test_isolation_assertion_fires_on_forced_bad_chunk[foreign_company / retired_version]`; mapping to 503 in P6 |
 | Old version answering | active pointer + deletion of old collection | `test_store_ingest.py::test_upgrade_flips_and_deletes_old_collection` |
-| Injection in policy text | excerpts tagged as data, `</excerpt>` escaped; no tools; schema + citation + grounding checks | `test_injection.py`, eval `injection` |
+| Injection in policy text | excerpts tagged as data, `&`/`<`/`>` escaped so text can't close a tag; no tools; strict schema + citation validation + grounding verifier + foreign-company check | `test_prompts.py::test_closing_tags_inside_policy_text_or_question_are_escaped`, `test_ask.py::test_naming_another_company_is_unverified`; eval `injection` (DEV pass with Groq; HELD-OUT in P7) |
 | Injection in question | same tagging; company not reachable from text | eval `k-inj-q`, `t-trap-claim` |
-| Invented citations | labels only; mapped by code | `test_citations.py` |
-| Hallucinated values | grounding verifier | `test_grounding.py`, unsupported-claim metric |
-| Malformed model output | strict Pydantic parse → 503 | `test_llm_output.py` |
+| Invented citations | model names labels only; code validates (⊆ given labels, 1–3, ≥1 when answered) and renders from metadata | `test_grounding.py::test_invalid_citations`, `test_ask.py::test_bad_citations_become_not_covered` |
+| Hallucinated values | grounding verifier over cited chunks + question | `test_grounding.py`, `test_ask.py::test_wrong_number_is_unverified`; eval unsupported-claim count (re-checked independently from policy files) |
+| Malformed model output | strict Pydantic parse (known fields, strict types; unknown keys ignored) → `LLMUnavailable` → 503 in P6 | `test_llm.py::test_parse_rejects_malformed`, eval `malformed_outputs` |
+| API key exposure | key only from env (`.env` via compose, gitignored + dockerignored); never in the image, logs, errors or `repr` | `test_llm.py` (key absent from errors and repr); P5 gate: 0 key matches in server logs, repo files, image env |
 | Half-updated policy | stage/validate/CAS flip; janitor | `test_store_ingest.py::test_embedder_fails_mid_add`, `::test_post_validation_fails`, `::test_crash_before_flip_then_janitor_on_restart` |
 | Concurrent ingests | per-company lock + UNIQUE(company, version) + CAS | `test_store_ingest.py::test_concurrent_same_version_one_wins`, `::test_concurrent_without_lock_database_still_guards` |
 | Admin of company A ingests for B | company taken from admin token | `test_ingest_atomic.py::test_cross_company_ingest_forbidden` |
@@ -525,6 +546,21 @@ Run: `docker compose run --rm api python -m eval.run_eval --split dev` (retrieva
 
 HELD-OUT measured once with this threshold (not changed afterwards): 0 of 19 answerable pre-filtered; 0 of 7 not-covered pre-filtered (lowest 0.294).
 
+### 8.7 Prompt versions and DEV iterations (P5)
+
+Rules: iterate on DEV only, at most 3 iterations; HELD-OUT run zero times in P5. Model `openai/gpt-oss-20b`, threshold 0.15, vector k=3, `--min-interval 8`.
+
+| Run | Prompt | What changed | DEV pass | Status acc. | False refusals | NC acc. | must_incl / must_not | Unsupported | Verifier rej. | Malformed | 429 | p50 / p95 ms | File |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | v1 | baseline (`app/prompts.py` SYSTEM_PROMPT) | **25/25** | 1.000 | 0 | 1.000 (11/11) | 1.000 / 1.000 | 0 | 0 | 0 | 0 | 802 / 1325 | `groq_vector_dev_v1.jsonl` |
+| A/B | v1+reasoning | adds a `"reasoning"` field before the verdict (ignored on parse) | 23/25 | 0.960 | 1 (unverified) | 1.000 | 0.917 / 1.000 | 0 | 1 | 0 | 0 | 829 / 1374 (max 2341) | `groq_vector_dev_v1-reasoning.jsonl` |
+| 2 | v1 (unchanged) | code only: verifier 12-hour rule (D62) + label stripping (D65) | **25/25** | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 0 | 0 | 0 | 0 | 880 / 1563 | `groq_vector_dev_v1-final.jsonl` |
+
+- **Prompt iterations used: 0 of 3.** v1 scored 25/25 on DEV in both runs, so there was nothing on DEV to iterate against. **v1 is final.**
+- **Reasoning-field A/B: rejected.** It did not improve DEV boundary or near-miss cases (both variants got all of them except the two failures below), and it was slower (max 2341 ms). Failures with it: `k-para-escort` false refusal (verifier bug, fixed in code, §9) and `k-gv-echo` answered "escort … after 10 PM" (echoed the old v1 value from the question; caught by must_include, not by the verifier: D62 trade-off).
+- DEV is now saturated (25/25), so it can't discriminate further; the HELD-OUT measurement in P7 is the honest number.
+- `llm_calls` max = 1 in every run; 2 of 25 DEV cases were answered `not_covered` by the pre-filter with 0 LLM calls.
+
 ### 8.4 Results
 
 **Retrieval only (P4, vector, k=3, threshold 0.15).** Real runs in Docker. hit@k and MRR are over cases whose expected status is exactly `answered`; multi-section cases count as a hit only when *all* expected sections are within k (D54).
@@ -537,6 +573,16 @@ HELD-OUT measured once with this threshold (not changed afterwards): 0 of 19 ans
 
 DEV hit@1 misses (rank in brackets): t-para-cutoff (3: §5 Holiday ranks above §3), o-para-elig (2: §1 Scope above §2), k-dev-typo-escort (3: "escrt after 9?"). HELD-OUT misses: t-multi-elig-cutoff and o-multi-weekend-cutoff (second section not in top 3, see §9), t-bnd-cutoff (2: §5 above §3).
 Latency includes the query embedding. It varies between runs on this machine (p95 47–73 ms); the first query after warm-up was 10–39 ms, so warm-up works. The budget is 500 ms.
+
+**Answer pipeline, in-process (P5).** FakeLLM over all splits is a pipeline check only (D24), not a measurement. Groq DEV rows are in §8.7. HELD-OUT with Groq: not run (P7).
+
+| Run | Split | cases | pass | status acc. | false refusals | NC acc. | must_incl / must_not | citation | unsupported | leaks | verifier rej. | malformed | llm_calls max | p50 / p95 ms |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| fake × vector | all (54 scored; auth skipped) | 54 | 31 | 0.704 | 0 | 0.111 | 0.812 / 0.944 | 0.812 | 0 | 0 | 0 | 0 | 1 | 14 / 23 |
+| groq × vector, v1 | DEV | 25 | 25 | 1.000 | 0 | 1.000 | 1.000 / 1.000 | 1.000 | 0 | 0 | 0 | 0 | 1 | 880 / 1563 (run 2) |
+| groq × vector | HELD-OUT | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run | not run |
+
+FakeLLM fails all not-covered traps (16 of 18) as expected: it always answers from S1.
 
 **Answer quality (P7)**
 
@@ -567,9 +613,14 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 | 2026-11-19 | P2 | Ingesting one 10-section policy took ~2 s; full suite 84 s. Measured: one 7-word query embedding = **490 ms** median in Docker, 442 ms locally | Chroma's MiniLM tokenizer pads every text to 256 tokens (`enable_padding(length=256)`), so each query runs a full 256-token pass. On Mac it also defaults to the CoreML provider | `app/embeddings.py` pads each text to its own length: **26 ms** median in Docker, 5 ms locally, identical vectors (8.6e-8). Suite now 13 s locally, 33 s in Docker (D31) |
 | 2026-11-19 | P2 | First fix attempt (pad to longest in batch) crashed: "inhomogeneous shape" | Chroma tokenizes each text separately, so different lengths can't be stacked | Embed one text per call |
 | 2026-11-19 | P2 | `DefaultEmbeddingFunction` has no `tokenizer` attribute | It wraps `ONNXMiniLM_L6_V2` | Use `ONNXMiniLM_L6_V2` directly |
+| 2026-11-20 | P5 | `app/llm.py` (GroqLLM over httpx, FakeLLM + 6 test modes, CallBudget, strict parse), `app/prompts.py` (v1 + reasoning variant), `app/grounding.py` (citations, verifier, foreign-company check, rendering, label strip), `app/ask.py` core `answer()`, `app/schemas.py`, `app/messages.py`, `app/textnorm.py`; eval `--llm fake|groq` through `answer()`; README LLM section. Groq checked live: Llama 404 → gpt-oss-20b. DEV: v1 25/25 twice, reasoning A/B rejected. D57–D66 | **green in Docker**: 348 passed + 1 skipped (online and `--network none`), eval exit 0 (FakeLLM); live Groq test passed when enabled | (to be filled by owner) |
 | 2026-11-20 | P4 | Step 1: +18 eval cases (DEV +11, HELD-OUT +7: multi-section, boundary, leak-bait, Hinglish) → 55; one logged refreeze (§8.5). Step 2: `eval/metrics.py` normaliser + `test_metrics.py` (37). Step 3: `app/retrieval.py` (Retriever interface, 0.5 s timeout, isolation assertion, pre-filter), `Store.query`, `test_retrieval.py` (14), retrieval-only eval runner (hit@1/hit@3/MRR, similarity, margin, latency). Threshold 0.15 from DEV (§8.6). HELD-OUT measured once (§8.4). D49–D56 | **green in Docker**: 253 passed (online and `--network none`), eval exit 0. Local venv not run | (to be filled by owner) |
 | 2026-11-20 | P3 | Docker pytest: 5 failed + 6 errors, `OSError: [Errno 24] Too many open files` | Every `TestClient(app)` start created a new ONNX session and a Chroma client and never closed them; the new auth tests started the app ~30 times | `shared_embedder()` (one model per process), `Store.close()` at shutdown, one module-scoped app in `test_auth.py`, store fixture closes (D45). Then 184 passed in 25 s (faster than P2's 33 s) |
 | 2026-11-20 | P3 | Local `.venv/bin/python` and `cat` hung for minutes | The project is on the iCloud-synced Desktop; macOS had offloaded 181 `.venv` files and 7 small repo files (`find -flags +dataless`), so each read waited for a download | Not a repo bug. Reading the 7 repo files restored them; P3 was verified in Docker only. Local venv not re-run (would need the offloaded files re-downloaded or the folder moved out of iCloud, which is a machine change I haven't made) |
+| 2026-11-20 | P5 | First Groq probe: `llama-3.1-8b-instant` and `llama-3.3-70b-versatile` → 404 "does not exist or you do not have access" | The free-tier key has no Llama access (docs list them as "contact sales") | Switched the default to `openai/gpt-oss-20b` (D57) |
+| 2026-11-20 | P5 | Probe call to gpt-oss-20b → 400 `json_validate_failed` | `max_tokens=20` in the probe; gpt-oss spends completion tokens on hidden reasoning, so the JSON was cut off | Probe only. The app uses 300 tokens; the 400 is mapped to `LLMUnavailable("http_400: json_validate_failed")` and counted as malformed in the eval (0 in all DEV runs) |
+| 2026-11-20 | P5 | Verifier false refusal on DEV `k-para-escort` (A/B run): unsupported `['21:30']` | Question said "9:30 at night" (no PM) → normalised "9:30"; the model wrote "9:30 PM" → "21:30" | A PM time also matches its 12-hour digits, with the digit-edge guard (D62). Unit tests incl. guards (`09:00` ≠ `9:00`, AM never borrows a PM source). DEV run 2: 25/25 |
+| 2026-11-20 | P5 | `test_principal_only.py::test_no_raw_request_access_in_app_source` failed on `app/llm.py` | The AST scan flagged `resp.headers` (Groq's response headers), not request access | Variables named `resp`/`response` are exempt; self-test proves `r.headers` is still caught |
 | 2026-11-20 | P4 | Known failure (HELD-OUT, not fixed): `t-multi-elig-cutoff` retrieves §2, §7, §8 (misses §3); `o-multi-weekend-cutoff` retrieves §5, §6, §9 (misses §3) | One query embedding for a two-part question lands near the first topic; MiniLM is small | Not tuned (HELD-OUT). Candidate fixes for later, judged on DEV only: hybrid BM25 (P8) may lift "book"/"cut-off" terms |
 | 2026-11-20 | P4 | Known weak results: `t-para-cutoff` (DEV) and `t-bnd-cutoff` (HELD-OUT) rank Tamarind §5 Holiday Pickups above §3 Booking Cut-off; `k-dev-typo-escort` "escrt after 9?" ranks §4 third | "request … in advance" wording appears in §5 too; typos break MiniLM's wordpieces | Still within top 3, so the LLM sees the right section. Logged, not tuned |
 | 2026-11-20 | P4 | First version of the timeout test would have measured ~1.5 s, not 0.5 s | `asyncio.run()` waits for worker threads at shutdown, so timing around it includes the sleeping thread | Time inside the coroutine. A server's event loop never shuts down per request, so production behaviour is the 0.5 s return (caught while writing, before any run) |
@@ -603,6 +654,10 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - Retrieval timeout returns at 0.5 s, but the worker thread keeps running until its search ends (threads can't be cancelled in Python). Under sustained slowness these threads could pile up in the default pool.
 - The pre-filter (0.15) catches only clearly unrelated questions; similarity distributions of answerable and silent near-miss questions overlap (§8.6).
 - The corpus is ~10 sections per company, so hit@3 is near 100% and can't separate vector from hybrid; hit@1 and MRR are the useful numbers.
+- Answers are always in English, also for Hinglish questions (D59).
+- Groq free tier: 8,000 tokens/minute for gpt-oss-20b ≈ 8 questions per minute for the whole service, and 1,000 requests/day. Beyond that users get "try again" (429 → 503). Fine for a demo; production needs a paid tier.
+- gpt-oss at temperature 0 is not fully deterministic: answers' wording varied between the two v1 DEV runs (verdicts did not).
+- The verifier accepts values that appear in the question, so an answer that repeats a wrong value from the question passes it (k-gv-echo in the A/B run). The eval's must_include catches this; the live system does not.
 - JWT is HS256 with a shared secret (mock issuer). Production would use RS256/ES256 so the API holds only a public key.
 - `/dev/token` appears in the OpenAPI schema even when DEV_MODE is off (it answers 404).
 - Verification machine: macOS arm64; Docker via Colima (Ubuntu 24.04 VM, 4 CPU, ~5.8 GiB), Docker CLI 29.10.0, Engine 29.5.2, Compose 5.8.0. Not tested on x86_64.
@@ -640,9 +695,9 @@ Expected (not a result): under FakeLLM, near-miss not-covered traps will fail be
 - **auth.py:** Why pin `algorithms`? What if the secret leaks? Why HS256 not RS256? (shared-secret mock issuer; RS256 in production so the API holds only a public key.)
 - **ask.py:** Walk me through a request. Where can it hang? What happens on 429?
 - **retrieval.py:** Why is the assertion needed if the collection is already per company? (It catches my own bugs; a wrong chunk is worse than no answer.) What happens to the thread after a timeout? (It finishes and is discarded.) Why 0.15? (§8.6 rule on DEV.) What does RRF do (P8)?
-- **llm.py:** How do you guarantee ≤ 2 calls? Why no retries? How does FakeLLM differ from production?
-- **prompts.py:** Why escape `</excerpt>`? Does the system prompt alone stop injection? (No — structure does.)
-- **grounding.py:** What does it miss? Show a false refusal. Why allow numbers from the question?
+- **llm.py:** How do you guarantee ≤ 2 calls? (`CallBudget` raises on the 3rd; the pipeline makes exactly 1.) Why no retries? (2.2 s timeout + retry can't fit in 3 s.) Why gpt-oss-20b? (Llama 404s on this key's free tier; Qwen is preview.) How does FakeLLM differ? (Extractive, can't judge silence: D24.)
+- **prompts.py:** Why escape `<`? (Policy text could close the excerpt tag.) Does the system prompt alone stop injection? (No: company from token, per-company retrieval, schema, citation and verifier checks.) Why no reasoning field? (A/B on DEV: 23/25 vs 25/25, slower, §8.7.)
+- **grounding.py:** What does it miss? (Names/approvers; an answer that echoes a wrong value from the question, e.g. k-gv-echo.) Show a false refusal (derived numbers: "1 more no-show"). Why allow numbers from the question? ("my drop is at 9:30 PM" must be repeatable.)
 - **ingest.py / store.py:** What if the process dies between staging and flip? Between flip and cleanup? Two admins at once?
 - **eval:** How do you know you didn't overfit? Why rule-based scoring? Why does FakeLLM fail near-miss traps?
 
@@ -673,6 +728,8 @@ docker compose run --rm api python -m scripts.issue_token --company kestrel --ro
 docker compose run --rm api python -m eval.freeze              # ✔ P3 prints the HELD-OUT hash
 docker compose run --rm api python -m eval.run_eval --split dev        # ✔ P4 retrieval-only, DEV
 docker compose run --rm api python -m eval.run_eval --split heldout    # ✔ P4 measured once
+docker compose run --rm api python -m eval.run_eval --llm groq --split dev --prompt v1 --tag v1   # ✔ P5 (paced, ~4 min)
+docker compose run --rm -e RUN_GROQ_TESTS=1 api pytest -m groq   # ✔ P5 one real Groq call
 # --- Planned ---
 docker compose run --rm api python -m eval.run_eval --llm groq --repeat 3 --split heldout
 docker compose run --rm api python -m eval.run_eval --retrieval hybrid
@@ -711,8 +768,8 @@ bash scripts/demo.sh
 | P2 | MUST | `store.py`, `ingest.py`: stage/validate/CAS flip/cleanup, janitor, per-company lock, seeding, CLI | `test_store_ingest.py` green in Docker |
 | P3 | MUST | `auth.py`, `/dev/token`, `/whoami`, `issue_token.py`, DEV_MODE guard; eval cases drafted + HELD-OUT frozen (pulled forward) | `test_auth.py`, `test_principal_only.py`, `test_eval_cases.py` green ✔ |
 | P4 | MUST | `retrieval.py` (vector), isolation assert, threshold pre-filter, startup warm-up; case-set revision + refreeze; scorer normaliser | `test_retrieval.py`, `test_metrics.py` green; first request not cold ✔ |
-| P5 | MUST | `llm.py` (Fake, Groq, Gemini, budget), `prompts.py`, parsing, citation check | `test_llm_output.py`, `test_citations.py`, `test_budget.py` green |
-| P5b | SHOULD | `grounding.py` | `test_grounding.py` green |
+| P5 | MUST | `llm.py` (Fake, Groq, budget, parse), `prompts.py`, citation check, `ask.py` core, eval `--llm` | `test_llm.py`, `test_prompts.py`, `test_ask.py` green ✔; DEV real-LLM run ✔ |
+| P5b | SHOULD | `grounding.py` | `test_grounding.py` green ✔ |
 | P6 | MUST | `ask.py` + error mapping in `main.py` | `test_failures.py`, `test_input.py`, `test_injection.py` green; manual curl works |
 | P7a | MUST | ≥ 10 cases + metrics + runner, FakeLLM | eval runs in container; leaks = 0 |
 | P7b | SHOULD | all 34 cases, freeze HELD-OUT, tune on DEV, Groq run + p95 | §8.4 filled with real numbers |
@@ -732,6 +789,27 @@ bash scripts/demo.sh
 | 2026-11-20 | P2 | `store.py` (registry, CAS flip, janitor, warm), `ingest.py` pipeline + seeding, `embeddings.py` (fast MiniLM), `scripts/ingest_cli.py`, startup = janitor → seed → warm. `test_store_ingest.py` (15) + `test_embeddings.py` (1). D31–D39 | **green in Docker**: 88 passed (online and `--network none`), eval exit 0, seeding once, restart no re-seed | (to be filled by owner) |
 | 2026-11-20 | P3 | `auth.py` (Principal, HS256-pinned verify, uniform 401, mint_token), `/dev/token` (404 unless DEV_MODE), `/whoami`, refuse-to-start log line, `scripts/issue_token.py`; `test_auth.py` (47), `test_principal_only.py` (5). Owner decisions applied: Tamarind §3 reworded; D31 comment block + same-embedder tests. Pulled forward from P7: `eval/cases.jsonl` (37), `eval/freeze.py`, `test_eval_cases.py` (40), HELD-OUT frozen (§8.5). Orbitron §7 wording, two case swaps (D48). Fixed fd exhaustion (D45). D40–D48 | **green in Docker**: 184 passed (online and `--network none`), eval exit 0. Local venv not run (§9) | (to be filled by owner) |
 | 2026-11-19/20 | P0 | Skeleton: config, `/health` + warm-up, placeholder modules, secret-scan + health tests, eval stub, Dockerfile, compose, ignore files, `.env.example`, pinned requirements + lock record, README stub. Decisions D25–D30 added. Colima/Docker installed on the machine | **Green in Docker and local venv** (evidence below) | (to be filled by owner) |
+
+#### P5 evidence (real outputs, Docker)
+```
+$ docker compose up -d ; curl /health        → {"status":"ok","ready":true,"llm":"groq","dev_mode":true}  HTTP 200  up->ready: 3 s
+  logs: INFO app LLM: groq model=openai/gpt-oss-20b timeout=2.2s
+        INFO app startup (janitor + seed + warm-up) done in 756 ms
+  "gsk_" in server logs: 0
+$ docker compose run --rm api pytest -q      → 348 passed, 1 skipped, 1 warning in 25.32s
+$ docker run --rm --network none <image> pytest -q   → 348 passed, 1 skipped, 1 warning in 25.81s
+$ docker compose run --rm -e RUN_GROQ_TESTS=1 api pytest -m groq   → 1 passed, 345 deselected in 5.25s
+$ docker compose run --rm api python -m eval.run_eval --quiet   (FakeLLM, all)   → eval exit=0
+  {"cases_scored": 54, "pass": 31, "status_accuracy": 0.704, "false_refusals": 0, "not_covered_accuracy": 0.111,
+   "must_include_pass_rate": 0.812, "must_not_pass_rate": 0.944, "unsupported_claims": 0, "leaks": 0, "malformed_outputs": 0,
+   "llm_calls_max": 1, "latency_ms": {"p50": 14.0, "p95": 23.0, "max": 30.0, "n": 54}}
+  FakeLLM run: pipeline check only; quality metrics need --llm groq
+$ eval --llm groq --split dev --prompt v1           → pass 25/25, p50 802 / p95 1325 ms, 429: 0
+$ eval --llm groq --split dev --prompt v1+reasoning → pass 23/25, p50 829 / p95 1374 / max 2341 ms, 429: 0
+$ eval --llm groq --split dev --prompt v1 (after verifier fix) → pass 25/25, p50 880 / p95 1563 / max 1706 ms, 429: 0
+$ secret grep (excl. .env) → exit=1; key value in any repo file except .env → not found; GROQ_API_KEY in image env → 0; .env in image → 0
+```
+Groq probes (2026-11-20, inside the container): `GET /models` 200; Llama IDs 404; gpt-oss-20b/120b and qwen3.8-27b → limit-requests 1000, limit-tokens 8000.
 
 #### P4 evidence (real outputs, Docker, empty volume via `docker compose down -v`)
 ```

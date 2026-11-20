@@ -22,6 +22,7 @@ APP_DIR = Path(__file__).resolve().parent.parent / "app"
 ISSUER_ROUTES = {"/dev/token"}      # mints tokens; reading a company there is the point
 RAW_ATTRS = {"headers", "query_params", "path_params", "cookies"}
 RAW_CALLS = {"json", "body", "form", "stream"}
+RESPONSE_NAMES = {"resp", "response"}   # outgoing-call responses (e.g. Groq's rate-limit headers) are fine
 
 
 def _field_names(field) -> list[str]:
@@ -56,7 +57,8 @@ def company_inputs(target: FastAPI) -> dict[str, list[str]]:
 def raw_request_access(source: str) -> list[str]:
     hits = []
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Attribute) and node.attr in RAW_ATTRS:
+        if (isinstance(node, ast.Attribute) and node.attr in RAW_ATTRS
+                and not (isinstance(node.value, ast.Name) and node.value.id in RESPONSE_NAMES)):
             hits.append(f"line {node.lineno}: .{node.attr}")
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr in RAW_CALLS and isinstance(node.func.value, ast.Name)
@@ -121,3 +123,5 @@ def test_static_check_catches_planted_violations():
         "    body = await request.json()\n"
     )
     assert len(raw_request_access(planted)) == 3
+    assert raw_request_access("x = resp.headers.get('retry-after')") == []
+    assert len(raw_request_access("x = r.headers.get('x-company')")) == 1

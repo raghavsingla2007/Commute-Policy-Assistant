@@ -20,11 +20,12 @@ def _bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     # LLM
-    llm_provider: str            # "groq" | "gemini" | "fake" — requested provider
+    llm_provider: str            # "groq" | "fake" (Gemini is a documented swap point, not implemented)
     groq_api_key: str
-    gemini_api_key: str
     llm_model: str
     llm_timeout_s: float
+    llm_max_tokens: int          # completion budget; on gpt-oss it includes the hidden reasoning tokens
+    llm_reasoning_effort: str    # gpt-oss: low | medium | high
     # Auth
     jwt_secret: str
     jwt_issuer: str
@@ -47,8 +48,6 @@ class Settings:
         """The LLM actually used: falls back to 'fake' when the chosen provider has no key."""
         if self.llm_provider == "groq" and self.groq_api_key:
             return "groq"
-        if self.llm_provider == "gemini" and self.gemini_api_key:
-            return "gemini"
         return "fake"
 
     def validate(self) -> None:
@@ -63,8 +62,10 @@ class Settings:
             raise ValueError("RETRIEVAL_K must be between 1 and 3 (max 3 cited chunks per answer)")
         if self.retrieval_mode not in {"vector", "hybrid"}:
             raise ValueError("RETRIEVAL_MODE must be 'vector' or 'hybrid'")
-        if self.llm_provider not in {"groq", "gemini", "fake"}:
-            raise ValueError("LLM_PROVIDER must be 'groq', 'gemini' or 'fake'")
+        if self.llm_provider not in {"groq", "fake"}:
+            raise ValueError("LLM_PROVIDER must be 'groq' or 'fake' (Gemini is not implemented; see README)")
+        if self.llm_reasoning_effort not in {"low", "medium", "high"}:
+            raise ValueError("LLM_REASONING_EFFORT must be low, medium or high")
 
 
 def load_settings() -> Settings:
@@ -72,9 +73,10 @@ def load_settings() -> Settings:
     return Settings(
         llm_provider=env("LLM_PROVIDER", "groq").strip().lower(),
         groq_api_key=env("GROQ_API_KEY", "").strip(),
-        gemini_api_key=env("GEMINI_API_KEY", "").strip(),
-        llm_model=env("LLM_MODEL", "llama-3.1-8b-instant"),
+        llm_model=env("LLM_MODEL", "openai/gpt-oss-20b"),   # checked 2026-11-20, PROJECT_LOG §3.5
         llm_timeout_s=float(env("LLM_TIMEOUT_S", "2.2")),
+        llm_max_tokens=int(env("LLM_MAX_TOKENS", "300")),
+        llm_reasoning_effort=env("LLM_REASONING_EFFORT", "low").strip().lower(),
         jwt_secret=env("JWT_SECRET", DEV_DEFAULT_JWT_SECRET),
         jwt_issuer=env("JWT_ISSUER", "commute-policy-mock-issuer"),
         jwt_audience=env("JWT_AUDIENCE", "commute-policy-api"),
